@@ -956,7 +956,7 @@ body {
 .settings-save-status {
   font-size: 0.8125rem;
 }
-.settings-dirty   { color: var(--muted); }
+.settings-dirty   { color: var(--primary); font-weight: 500; }
 .settings-saved-at { color: var(--success); }
 
 /* fix 8: save spinner */
