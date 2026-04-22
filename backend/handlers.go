@@ -83,7 +83,7 @@ func (h *Handler) taskOwnerCheck(w http.ResponseWriter, taskID, userID int64) (T
 		return Task{}, false
 	}
 	if err != nil {
-		writeError(w, "failed to get task", http.StatusInternalServerError)
+		writeServerError(w, "failed to get task", err)
 		return Task{}, false
 	}
 	if task.UserID != userID {
@@ -101,10 +101,24 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
+func writeJSONCreated(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("writeJSON: encode error: %v", err)
+	}
+}
+
 func writeError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// writeServerError logs err server-side and sends a generic 500 to the client.
+func writeServerError(w http.ResponseWriter, msg string, err error) {
+	log.Printf("error: %s: %v", msg, err)
+	writeError(w, msg, http.StatusInternalServerError)
 }
 
 // isValidYearMonth checks that s is a valid YYYY-MM string.
@@ -131,7 +145,7 @@ func safeRemoveReceipt(receiptsDir, filename string) {
 func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.db.GetSettings(currentUser(r).UserID)
 	if err != nil {
-		writeError(w, "failed to get settings", http.StatusInternalServerError)
+		writeServerError(w, "failed to get settings", err)
 		return
 	}
 	writeJSON(w, settings)
@@ -170,12 +184,12 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	userID := currentUser(r).UserID
 	if err := h.db.SaveSettings(userID, filtered); err != nil {
-		writeError(w, "failed to save settings", http.StatusInternalServerError)
+		writeServerError(w, "failed to save settings", err)
 		return
 	}
 	settings, err := h.db.GetSettings(userID)
 	if err != nil {
-		writeError(w, "failed to get settings", http.StatusInternalServerError)
+		writeServerError(w, "failed to get settings", err)
 		return
 	}
 	writeJSON(w, settings)
@@ -195,7 +209,7 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	tasks, err := h.db.GetTasks(month, currentUser(r).UserID)
 	if err != nil {
-		writeError(w, "failed to list tasks", http.StatusInternalServerError)
+		writeServerError(w, "failed to list tasks", err)
 		return
 	}
 	writeJSON(w, tasks)
@@ -271,11 +285,10 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.db.CreateTask(req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, currentUser(r).UserID, req.Interval)
 	if err != nil {
-		writeError(w, "failed to create task", http.StatusInternalServerError)
+		writeServerError(w, "failed to create task", err)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, task)
+	writeJSONCreated(w, task)
 }
 
 func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +354,7 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.db.UpdateTask(id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, req.Interval)
 	if err != nil {
-		writeError(w, "failed to update task", http.StatusInternalServerError)
+		writeServerError(w, "failed to update task", err)
 		return
 	}
 	writeJSON(w, task)
@@ -356,17 +369,18 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID); !ok {
 		return
 	}
-	// Clean up receipt files before deletion (cascade removes DB rows).
+	// Collect receipt filenames before deletion (cascade will remove DB rows).
 	receipts, err := h.db.GetReceiptsForTask(id)
 	if err != nil {
 		log.Printf("GetReceiptsForTask(%d): %v", id, err)
 	}
+	// Delete DB record first; only remove files after the DB confirms success.
+	if err = h.db.DeleteTask(id); err != nil {
+		writeServerError(w, "failed to delete task", err)
+		return
+	}
 	for _, f := range receipts {
 		safeRemoveReceipt(h.receiptsDir, f)
-	}
-	if err = h.db.DeleteTask(id); err != nil {
-		writeError(w, "failed to delete task", http.StatusInternalServerError)
-		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -385,7 +399,7 @@ func (h *Handler) ListCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	completions, err := h.db.GetCompletions(month, currentUser(r).UserID)
 	if err != nil {
-		writeError(w, "failed to list completions", http.StatusInternalServerError)
+		writeServerError(w, "failed to list completions", err)
 		return
 	}
 	writeJSON(w, completions)
@@ -414,20 +428,22 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 
 	existing, found, err := h.db.GetCompletion(req.TaskID, req.Month)
 	if err != nil {
-		writeError(w, "failed to check completion", http.StatusInternalServerError)
+		writeServerError(w, "failed to check completion", err)
 		return
 	}
 
 	if found {
-		safeRemoveReceipt(h.receiptsDir, existing.ReceiptFile)
+		// Remove DB record first; delete file only after DB confirms success.
+		receiptFile := existing.ReceiptFile
 		if err := h.db.RemoveCompletion(req.TaskID, req.Month); err != nil {
-			writeError(w, "failed to remove completion", http.StatusInternalServerError)
+			writeServerError(w, "failed to remove completion", err)
 			return
 		}
+		safeRemoveReceipt(h.receiptsDir, receiptFile)
 		writeJSON(w, map[string]bool{"completed": false})
 	} else {
 		if _, err := h.db.AddCompletion(req.TaskID, req.Month); err != nil {
-			writeError(w, "failed to add completion", http.StatusInternalServerError)
+			writeServerError(w, "failed to add completion", err)
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
@@ -451,7 +467,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 
 	_, found, err := h.db.GetCompletion(taskID, month)
 	if err != nil {
-		writeError(w, "failed to check completion", http.StatusInternalServerError)
+		writeServerError(w, "failed to check completion", err)
 		return
 	}
 	if !found {
@@ -475,7 +491,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 
 	completion, err := h.db.SetCompletionAmount(taskID, month, req.Amount)
 	if err != nil {
-		writeError(w, "failed to update completion", http.StatusInternalServerError)
+		writeServerError(w, "failed to update completion", err)
 		return
 	}
 	writeJSON(w, completion)
@@ -498,7 +514,7 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 
 	existing, found, err := h.db.GetCompletion(taskID, month)
 	if err != nil {
-		writeError(w, "failed to check completion", http.StatusInternalServerError)
+		writeServerError(w, "failed to check completion", err)
 		return
 	}
 	if !found {
@@ -534,32 +550,32 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		writeError(w, "failed to process file", http.StatusInternalServerError)
+		writeServerError(w, "failed to process file", err)
 		return
 	}
 
 	filename := uuid.New().String() + ext
 	dst, err := os.Create(filepath.Join(h.receiptsDir, filename))
 	if err != nil {
-		writeError(w, "failed to save file", http.StatusInternalServerError)
+		writeServerError(w, "failed to save file", err)
 		return
 	}
 	defer dst.Close()
 	if _, err := io.Copy(dst, file); err != nil {
 		os.Remove(filepath.Join(h.receiptsDir, filename))
-		writeError(w, "failed to save file", http.StatusInternalServerError)
+		writeServerError(w, "failed to save file", err)
 		return
 	}
 
-	// Replace old receipt file if one existed.
-	safeRemoveReceipt(h.receiptsDir, existing.ReceiptFile)
-
+	// Update DB first; only remove old file after the DB confirms success.
+	oldReceipt := existing.ReceiptFile
 	completion, err := h.db.SetCompletionReceipt(taskID, month, filename)
 	if err != nil {
 		os.Remove(filepath.Join(h.receiptsDir, filename))
-		writeError(w, "failed to update completion", http.StatusInternalServerError)
+		writeServerError(w, "failed to update completion", err)
 		return
 	}
+	safeRemoveReceipt(h.receiptsDir, oldReceipt)
 	writeJSON(w, completion)
 }
 
@@ -580,7 +596,7 @@ func (h *Handler) DeleteCompletionReceipt(w http.ResponseWriter, r *http.Request
 
 	existing, found, err := h.db.GetCompletion(taskID, month)
 	if err != nil {
-		writeError(w, "failed to check completion", http.StatusInternalServerError)
+		writeServerError(w, "failed to check completion", err)
 		return
 	}
 	if !found {
@@ -592,13 +608,14 @@ func (h *Handler) DeleteCompletionReceipt(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	safeRemoveReceipt(h.receiptsDir, existing.ReceiptFile)
-
+	// Clear DB record first; only remove file after the DB confirms success.
+	receiptFile := existing.ReceiptFile
 	completion, err := h.db.ClearCompletionReceipt(taskID, month)
 	if err != nil {
-		writeError(w, "failed to update completion", http.StatusInternalServerError)
+		writeServerError(w, "failed to update completion", err)
 		return
 	}
+	safeRemoveReceipt(h.receiptsDir, receiptFile)
 	writeJSON(w, completion)
 }
 
@@ -611,7 +628,7 @@ func (h *Handler) ServeReceipt(w http.ResponseWriter, r *http.Request) {
 	// Verify the receipt belongs to a completion owned by the requesting user.
 	ok, err := h.db.ReceiptBelongsToUser(filename, currentUser(r).UserID)
 	if err != nil {
-		writeError(w, "failed to verify access", http.StatusInternalServerError)
+		writeServerError(w, "failed to verify access", err)
 		return
 	}
 	if !ok {
