@@ -26,9 +26,10 @@ up-postgres:
 down:
 	docker compose down
 
-# Run backend tests
+# Run all tests (backend + frontend)
 test:
 	cd backend && go test ./...
+	cd frontend && npm test
 
 # Remove containers AND the data volume
 clean:
