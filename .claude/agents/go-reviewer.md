@@ -6,7 +6,7 @@ tools: Read, Glob, Grep
 
 You are a Go expert reviewing the montly backend.
 
-Stack: Go 1.22, Chi router, modernc.org/sqlite (pure Go, no CGO), multipart file handling, go:embed for the frontend dist.
+Stack: Go 1.25, Chi router, modernc.org/sqlite (pure Go, no CGO), multipart file handling, go:embed for the frontend dist.
 
 File layout:
 - main.go — Chi router setup, go:embed, server config

@@ -6,7 +6,7 @@ tools: Read, Glob, Grep, Bash
 
 You are a performance engineer reviewing the montly project across all layers.
 
-Stack: Go 1.22 + SQLite backend, React 19 + Vite frontend, multi-stage Docker build.
+Stack: Go 1.25 + SQLite backend, React 19 + Vite frontend, multi-stage Docker build.
 
 Areas to analyze:
 

@@ -152,7 +152,7 @@ func TestClientIPForwardedFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.Header.Set("X-Forwarded-For", tc.header)
-			got := clientIP(req)
+			got := clientIP(req, true)
 			if got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
@@ -163,7 +163,7 @@ func TestClientIPForwardedFor(t *testing.T) {
 func TestClientIPRemoteAddr(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:54321"
-	got := clientIP(req)
+	got := clientIP(req, false)
 	if got != "192.168.1.1" {
 		t.Errorf("got %q, want 192.168.1.1", got)
 	}
