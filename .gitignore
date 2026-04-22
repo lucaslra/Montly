@@ -2,7 +2,7 @@
 backend/montly
 
 # Embedded frontend (built artifact — placeholder kept for local dev)
-backend/dist/
+backend/dist/*
 !backend/dist/index.html
 
 # Frontend
