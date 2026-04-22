@@ -229,7 +229,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Expires: time.Now().Add(sessionDuration).Unix(),
 	}
 	if err := setSession(w, claims, h.secret, h.secure); err != nil {
-		writeError(w, "failed to create session", http.StatusInternalServerError)
+		writeServerError(w, "failed to create session", err)
 		return
 	}
 	writeJSON(w, map[string]any{"id": user.ID, "username": user.Username, "is_admin": user.IsAdmin})
@@ -267,7 +267,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.db.GetUserByID(currentUser(r).UserID)
 	if err != nil {
-		writeError(w, "user not found", http.StatusInternalServerError)
+		writeServerError(w, "user not found", err)
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
@@ -277,11 +277,11 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		writeError(w, "failed to hash password", http.StatusInternalServerError)
+		writeServerError(w, "failed to hash password", err)
 		return
 	}
 	if err := h.db.UpdateUserPassword(user.ID, string(newHash)); err != nil {
-		writeError(w, "failed to update password", http.StatusInternalServerError)
+		writeServerError(w, "failed to update password", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -296,7 +296,7 @@ type UserHandler struct {
 func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.db.ListUsers()
 	if err != nil {
-		writeError(w, "failed to list users", http.StatusInternalServerError)
+		writeServerError(w, "failed to list users", err)
 		return
 	}
 	writeJSON(w, users)
@@ -327,7 +327,7 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		writeError(w, "failed to hash password", http.StatusInternalServerError)
+		writeServerError(w, "failed to hash password", err)
 		return
 	}
 	user, err := h.db.CreateUser(req.Username, string(hash), req.IsAdmin)
@@ -336,11 +336,10 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "username already exists", http.StatusConflict)
 			return
 		}
-		writeError(w, "failed to create user", http.StatusInternalServerError)
+		writeServerError(w, "failed to create user", err)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]any{"id": user.ID, "username": user.Username, "is_admin": user.IsAdmin, "created_at": user.CreatedAt})
+	writeJSONCreated(w, map[string]any{"id": user.ID, "username": user.Username, "is_admin": user.IsAdmin, "created_at": user.CreatedAt})
 }
 
 func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -360,13 +359,13 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, "failed to get user", http.StatusInternalServerError)
+		writeServerError(w, "failed to get user", err)
 		return
 	}
 	if target.IsAdmin {
 		n, err := h.db.CountAdmins()
 		if err != nil {
-			writeError(w, "failed to check admins", http.StatusInternalServerError)
+			writeServerError(w, "failed to check admins", err)
 			return
 		}
 		if n <= 1 {
@@ -375,7 +374,7 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := h.db.DeleteUser(id); err != nil {
-		writeError(w, "failed to delete user", http.StatusInternalServerError)
+		writeServerError(w, "failed to delete user", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -390,7 +389,7 @@ type TokenHandler struct {
 func (h *TokenHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
 	tokens, err := h.db.ListTokens(currentUser(r).UserID)
 	if err != nil {
-		writeError(w, "failed to list tokens", http.StatusInternalServerError)
+		writeServerError(w, "failed to list tokens", err)
 		return
 	}
 	if tokens == nil {
@@ -414,7 +413,7 @@ func (h *TokenHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		writeError(w, "failed to generate token", http.StatusInternalServerError)
+		writeServerError(w, "failed to generate token", err)
 		return
 	}
 	plaintext := "mt_" + base64.RawURLEncoding.EncodeToString(b)
@@ -422,12 +421,11 @@ func (h *TokenHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 
 	tok, err := h.db.CreateToken(currentUser(r).UserID, req.Name, hash)
 	if err != nil {
-		writeError(w, "failed to create token", http.StatusInternalServerError)
+		writeServerError(w, "failed to create token", err)
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, map[string]any{
+	writeJSONCreated(w, map[string]any{
 		"token":     tok,
 		"plaintext": plaintext,
 	})
@@ -443,7 +441,7 @@ func (h *TokenHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "token not found", http.StatusNotFound)
 		return
 	} else if err != nil {
-		writeError(w, "failed to revoke token", http.StatusInternalServerError)
+		writeServerError(w, "failed to revoke token", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
