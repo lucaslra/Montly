@@ -27,6 +27,7 @@ The app listens on `127.0.0.1:8080`. Reach it at `http://localhost:8080`.
 | `SECURE_COOKIES`   | `false`      | Set `true` when serving over HTTPS — adds `Secure` flag and HSTS header |
 | `DB_TYPE`          | `sqlite`     | `sqlite` or `postgres` |
 | `DATABASE_URL`     | *(required for postgres)* | Full Postgres connection string |
+| `TRUST_PROXY_HEADERS` | `false`   | Set `true` when behind a trusted reverse proxy that sets `X-Forwarded-For`. Required for accurate IP-based rate limiting. **Do not enable** unless a proxy you control is stripping or overwriting this header. |
 
 ---
 

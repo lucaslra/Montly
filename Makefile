@@ -1,4 +1,4 @@
-.PHONY: setup dev-backend dev-frontend build up up-postgres down clean
+.PHONY: setup dev-backend dev-frontend build up up-postgres down clean test
 
 # First-time setup: install all dependencies
 setup:
@@ -25,6 +25,10 @@ up-postgres:
 
 down:
 	docker compose down
+
+# Run backend tests
+test:
+	cd backend && go test ./...
 
 # Remove containers AND the data volume
 clean:
