@@ -257,9 +257,11 @@ export default function App() {
     }
   }
 
-  const done = tasks.filter(t => completionMap.has(t.id)).length
-  const total = tasks.length
-  const pct = total ? (done / total) * 100 : 0
+  const { done, total, pct } = useMemo(() => {
+    const d = tasks.filter(t => completionMap.has(t.id)).length
+    const t = tasks.length
+    return { done: d, total: t, pct: t ? (d / t) * 100 : 0 }
+  }, [tasks, completionMap])
 
   const { hasMonetary, dueAmount, paidAmount, isSettled } = useMemo(() => {
     const MONETARY_TYPES = ['payment', 'subscription', 'bill']
@@ -282,6 +284,8 @@ export default function App() {
 
   if (!authChecked) return <div className="loading">Loading…</div>
   if (!user) return <LoginView onLogin={u => setUser(u)} />
+
+  const currentMonth = getCurrentMonth()
 
   return (
     <div className="app">
@@ -339,7 +343,7 @@ export default function App() {
                 aria-expanded={showMonthPicker}
               >
                 {formatMonth(month, settings.date_format)}
-                {month === getCurrentMonth() && <span className="current-month-dot" aria-hidden="true" />}
+                {month === currentMonth && <span className="current-month-dot" aria-hidden="true" />}
               </button>
               <button className="nav-btn" onClick={() => setMonth(m => addMonths(m, 1))} aria-label="Next month">›</button>
             </div>
@@ -352,7 +356,7 @@ export default function App() {
                 />
                 <button
                   className="btn-secondary btn-sm"
-                  onClick={() => { setMonth(getCurrentMonth()); setShowMonthPicker(false) }}
+                  onClick={() => { setMonth(currentMonth); setShowMonthPicker(false) }}
                 >
                   Today
                 </button>
