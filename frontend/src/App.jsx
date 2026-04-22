@@ -295,7 +295,7 @@ export default function App() {
               title="Toggle theme"
               aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             >
-              {isDark ? '☀' : '☾'}
+              <span aria-hidden="true">{isDark ? '☀' : '☾'}</span>
             </button>
             {view === 'settings' ? (
               <button className="view-toggle" onClick={() => setView('monthly')}>← Back</button>
@@ -313,7 +313,7 @@ export default function App() {
                   title="Settings"
                   aria-label="Settings"
                 >
-                  ⚙
+                  <span aria-hidden="true">⚙</span>
                 </button>
               </>
             )}
@@ -323,7 +323,7 @@ export default function App() {
               title={`Sign out (${user.username})`}
               aria-label={`Sign out (${user.username})`}
             >
-              ⏏
+              <span aria-hidden="true">⏏</span>
             </button>
           </div>
         </div>
@@ -331,7 +331,7 @@ export default function App() {
         {view === 'monthly' && (
           <>
             <div className="month-nav">
-              <button className="nav-btn" onClick={() => setMonth(m => addMonths(m, -1))} aria-label="Previous month">‹</button>
+              <button className="nav-btn" onClick={() => setMonth(m => addMonths(m, -1))} aria-label="Previous month"><span aria-hidden="true">‹</span></button>
               <button
                 className="month-label-btn"
                 onClick={() => setShowMonthPicker(v => !v)}
@@ -341,7 +341,7 @@ export default function App() {
                 {formatMonth(month, settings.date_format)}
                 {month === getCurrentMonth() && <span className="current-month-dot" aria-hidden="true" />}
               </button>
-              <button className="nav-btn" onClick={() => setMonth(m => addMonths(m, 1))} aria-label="Next month">›</button>
+              <button className="nav-btn" onClick={() => setMonth(m => addMonths(m, 1))} aria-label="Next month"><span aria-hidden="true">›</span></button>
             </div>
             {showMonthPicker && (
               <div className="month-jump-picker">
@@ -359,10 +359,17 @@ export default function App() {
               </div>
             )}
             <div className="progress">
-              <div className="progress-bar">
+              <div
+                className="progress-bar"
+                role="progressbar"
+                aria-valuenow={done}
+                aria-valuemin={0}
+                aria-valuemax={total}
+                aria-label={`${done} of ${total} tasks complete`}
+              >
                 <div className="progress-fill" style={{ width: `${pct}%` }} />
               </div>
-              <span className="progress-text">{done}/{total}</span>
+              <span className="progress-text" aria-hidden="true">{done}/{total}</span>
             </div>
             {hasMonetary && (
               <div className="monetary-summary">
@@ -385,12 +392,12 @@ export default function App() {
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
-            <button className="error-dismiss" onClick={() => setError(null)} title="Dismiss">✕</button>
+            <button className="error-dismiss" onClick={() => setError(null)} aria-label="Dismiss error">✕</button>
           </div>
         )}
         {/* fix 6: spinner only on first load; subsequent loads fade the list */}
         {!initialized && loading ? (
-          <div className="loading">Loading…</div>
+          <div className="loading" aria-busy="true" aria-live="polite">Loading…</div>
         ) : view === 'monthly' ? (
           <div style={{ opacity: loading ? 0.5 : 1, transition: 'opacity 0.15s', pointerEvents: loading ? 'none' : 'auto' }}>
             <TaskList

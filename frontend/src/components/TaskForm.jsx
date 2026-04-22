@@ -23,14 +23,21 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
     if (value) setViewYear(parseInt(value.split('-')[0]))
   }, [value])
 
-  // Close on outside click (popover mode only)
+  // Close on outside click or Escape (popover mode only)
   useEffect(() => {
     if (inline || !open) return
-    function handler(e) {
+    function handleClick(e) {
       if (!rootRef.current?.contains(e.target)) setOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) }
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
   }, [open, inline])
 
   const selYear  = value ? value.split('-')[0] : null
@@ -51,9 +58,9 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
   const grid = (
     <div className="mp-panel" onClick={e => e.stopPropagation()}>
       <div className="mp-year-nav">
-        <button type="button" className="mp-nav-btn" onClick={() => setViewYear(y => y - 1)}>‹</button>
-        <span className="mp-year-label">{viewYear}</span>
-        <button type="button" className="mp-nav-btn" onClick={() => setViewYear(y => y + 1)}>›</button>
+        <button type="button" className="mp-nav-btn" onClick={() => setViewYear(y => y - 1)} aria-label="Previous year"><span aria-hidden="true">‹</span></button>
+        <span className="mp-year-label" aria-live="polite" aria-atomic="true">{viewYear}</span>
+        <button type="button" className="mp-nav-btn" onClick={() => setViewYear(y => y + 1)} aria-label="Next year"><span aria-hidden="true">›</span></button>
       </div>
       <div className="mp-grid">
         {MONTH_LABELS.map((label, idx) => {
@@ -87,7 +94,7 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
         onClick={() => setOpen(o => !o)}
         aria-label={label ? `${label}: ${formatValue(value) ?? 'not set'}` : undefined}
         aria-expanded={open}
-        aria-haspopup="true"
+        aria-haspopup="listbox"
       >
         {formatValue(value) ?? <span className="mp-placeholder">Select month</span>}
       </button>
@@ -166,13 +173,17 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
   return (
     <div
       className="modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="task-form-title"
       onClick={onClose}
       onKeyDown={handleOverlayKeyDown}
     >
-      <div className="modal" ref={modalRef} onClick={e => e.stopPropagation()}>
+      <div
+        className="modal"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-form-title"
+        onClick={e => e.stopPropagation()}
+      >
         <h3 id="task-form-title">{task ? 'Edit Task' : 'New Task'}</h3>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
