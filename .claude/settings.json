@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Loading project instructions...",
+            "command": "python3 -c \"\nimport os, json, glob\ncwd = '/Users/lucaslra/learn/monties'\nparts = []\nclaude_md = os.path.join(cwd, 'CLAUDE.md')\nif os.path.exists(claude_md):\n    parts.append('## CLAUDE.md\\n' + open(claude_md).read().strip())\nfor f in sorted(glob.glob(os.path.join(cwd, '.claude/agents/*.md'))):\n    parts.append('## Agent: ' + os.path.basename(f).replace('.md', '') + '\\n' + open(f).read().strip())\nif parts:\n    ctx = '\\n\\n---\\n\\n'.join(parts)\n    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': ctx}}))\n\""
+          }
+        ]
+      }
+    ]
+  }
+}

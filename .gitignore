@@ -1,0 +1,16 @@
+# Go build output
+backend/montly
+
+# Embedded frontend (built artifact — placeholder kept for local dev)
+backend/dist/
+!backend/dist/index.html
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Local database
+data/
+
+# OS
+.DS_Store

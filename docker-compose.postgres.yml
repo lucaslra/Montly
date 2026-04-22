@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: montly-postgres
+    environment:
+      POSTGRES_DB: montly
+      POSTGRES_USER: ${POSTGRES_USER:-montly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or environment}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-montly}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  montly:
+    environment:
+      DB_TYPE: postgres
+      DATABASE_URL: postgres://${POSTGRES_USER:-montly}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or environment}@postgres:5432/montly
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

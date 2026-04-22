@@ -1,0 +1,17 @@
+services:
+  montly:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - montly_data:/data
+    env_file:
+      - path: .env
+        required: false  # copy .env.example → .env and set credentials before first run
+    environment:
+      DATA_DIR: /data
+      PORT: "8080"
+    restart: unless-stopped
+
+volumes:
+  montly_data:
