@@ -36,25 +36,16 @@ func securityHeaders(secure bool) func(http.Handler) http.Handler {
 	}
 }
 
-func recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Printf("panic: %v", err)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"error":"internal server error"}`))
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
-
 func main() {
 	// ── Database ──────────────────────────────────────────────────────────────
 	dbType := os.Getenv("DB_TYPE")
 	if dbType == "" {
 		dbType = "sqlite"
+	}
+
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
 	}
 
 	var dbDSN string
@@ -65,10 +56,6 @@ func main() {
 			log.Fatal("DATABASE_URL is required when DB_TYPE=postgres")
 		}
 	case "sqlite":
-		dataDir := os.Getenv("DATA_DIR")
-		if dataDir == "" {
-			dataDir = "./data"
-		}
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			log.Fatalf("create data dir: %v", err)
 		}
@@ -127,10 +114,6 @@ func main() {
 	}
 
 	// ── Files & receipts ──────────────────────────────────────────────────────
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
-	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Fatalf("create data dir: %v", err)
 	}
@@ -168,7 +151,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(securityHeaders(secureCookies))
-	r.Use(recoverer)
+	r.Use(middleware.Recoverer)
 
 	mountRoutes := func(r chi.Router) {
 		// Add API version header to all API responses.
@@ -243,9 +226,11 @@ func spaHandler(fsys fs.FS) http.Handler {
 		if clean == "." {
 			clean = "index.html"
 		}
-		if _, err := fsys.Open(clean); err != nil {
+		if f, err := fsys.Open(clean); err != nil {
 			http.ServeFileFS(w, r, fsys, "index.html")
 			return
+		} else {
+			f.Close()
 		}
 		fileServer.ServeHTTP(w, r)
 	})
