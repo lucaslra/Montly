@@ -4,6 +4,10 @@ on:
   push:
     tags: ['v*.*.*']
 
+permissions:
+  contents: write   # create GitHub release
+  packages: write   # push to ghcr.io
+
 jobs:
   release:
     name: Build & publish
@@ -17,19 +21,19 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: git.nlga.me/lucaslra/montly
+          images: ghcr.io/${{ github.repository_owner }}/montly
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      - name: Log in to registry
+      - name: Log in to ghcr.io
         uses: docker/login-action@v3
         with:
-          registry: git.nlga.me
+          registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.REGISTRY_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -41,15 +45,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Create release
-        uses: ncipollo/release-action@v1
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          token: ${{ github.token }}
           body: |
             ## Docker
 
             ```
-            docker pull git.nlga.me/lucaslra/montly:${{ github.ref_name }}
+            docker pull ghcr.io/${{ github.repository_owner }}/montly:${{ github.ref_name }}
             ```
 
-            See [CHANGELOG.md](https://git.nlga.me/lucaslra/Montly/src/branch/main/CHANGELOG.md) for what changed.
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what changed.
