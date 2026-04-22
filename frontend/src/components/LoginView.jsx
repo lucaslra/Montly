@@ -36,6 +36,8 @@ export default function LoginView({ onLogin }) {
               onChange={e => setUsername(e.target.value)}
               required
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
             />
           </div>
           <div className="form-group">

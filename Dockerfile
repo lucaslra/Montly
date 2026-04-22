@@ -1,8 +1,8 @@
 # Stage 1: Build frontend
 FROM node:22-alpine AS frontend
 WORKDIR /app
-COPY frontend/package.json ./
-RUN npm install
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 COPY frontend/ .
 RUN npm run build
 

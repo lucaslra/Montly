@@ -116,10 +116,18 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
   const modalRef = useRef(null)
 
   useEffect(() => {
-    // Lock body scroll while modal is open (prevents iOS scroll-behind)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    // Lock body scroll while modal is open.
+    // iOS Safari ignores overflow:hidden on body, so we use the position:fixed trick.
+    const scrollY = window.scrollY
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.width = '100%'
+    return () => {
+      document.body.style.position = ''
+      document.body.style.top = ''
+      document.body.style.width = ''
+      window.scrollTo(0, scrollY)
+    }
   }, [])
 
   useEffect(() => {
