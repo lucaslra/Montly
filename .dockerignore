@@ -1,0 +1,27 @@
+# Version control
+.git
+.gitignore
+
+# Local dev / editor
+.env
+*.local
+.DS_Store
+.vscode
+.idea
+
+# Frontend build artefacts (rebuilt inside Docker)
+frontend/node_modules
+frontend/dist
+
+# Backend binary (built inside Docker)
+backend/montly
+backend/monties
+
+# Test data
+backend/*.db
+data/
+
+# Claude / project config
+.claude
+CLAUDE.md
+docs/
