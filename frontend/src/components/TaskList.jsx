@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 
 const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.gif'
 
-export default function TaskList({ tasks, completionMap, currency = '$', uploadingTaskId, onToggle, onUploadReceipt, onRemoveReceipt, onUpdateCompletion, onGoToManage }) {
+const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', uploadingTaskId, onToggle, onUploadReceipt, onRemoveReceipt, onUpdateCompletion, onGoToManage }) {
   const [confirmUndo, setConfirmUndo] = useState(null)
 
   if (tasks.length === 0) {
@@ -95,7 +95,9 @@ export default function TaskList({ tasks, completionMap, currency = '$', uploadi
       })}
     </ul>
   )
-}
+})
+
+export default TaskList
 
 function PaymentSlot({ taskId, taskType, defaultAmount, completion, currency = '$', isUploading, onSaveAmount, onUploadReceipt, onRemoveReceipt }) {
   const done = Boolean(completion)
