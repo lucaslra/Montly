@@ -23,12 +23,11 @@ type Handler struct {
 
 // receiptFilenameRe enforces that stored/served filenames are always UUID-based.
 var receiptFilenameRe = regexp.MustCompile(
-	`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|txt|jpg|jpeg|png|webp|gif)$`,
+	`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|jpg|jpeg|png|webp|gif)$`,
 )
 
 var allowedExtensions = map[string]bool{
 	".pdf":  true,
-	".txt":  true,
 	".jpg":  true,
 	".jpeg": true,
 	".png":  true,
@@ -37,14 +36,13 @@ var allowedExtensions = map[string]bool{
 }
 
 // allowedMIMEPrefixes are the content-sniffed types we accept.
-// Using prefix match so "text/plain; charset=utf-8" matches "text/plain".
+// Using prefix match so "image/jpeg; charset=..." still matches "image/jpeg".
 var allowedMIMEPrefixes = []string{
 	"image/jpeg",
 	"image/png",
 	"image/gif",
 	"image/webp",
 	"application/pdf",
-	"text/plain",
 }
 
 func isAllowedMIME(detected string) bool {
@@ -252,6 +250,10 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "metadata too large", http.StatusBadRequest)
 		return
 	}
+	if len(req.Metadata) > 0 && !json.Valid(req.Metadata) {
+		writeError(w, "metadata must be valid JSON", http.StatusBadRequest)
+		return
+	}
 	if req.StartDate != "" && !isValidYearMonth(req.StartDate) {
 		writeError(w, "start_date must be YYYY-MM format", http.StatusBadRequest)
 		return
@@ -316,6 +318,10 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Metadata) > 4096 {
 		writeError(w, "metadata too large", http.StatusBadRequest)
+		return
+	}
+	if len(req.Metadata) > 0 && !json.Valid(req.Metadata) {
+		writeError(w, "metadata must be valid JSON", http.StatusBadRequest)
 		return
 	}
 	if req.StartDate != "" && !isValidYearMonth(req.StartDate) {

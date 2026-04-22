@@ -27,7 +27,8 @@ func securityHeaders(secure bool) func(http.Handler) http.Handler {
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			w.Header().Set("Content-Security-Policy",
-				"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:")
+				"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'")
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 			if secure {
 				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
@@ -152,6 +153,9 @@ func main() {
 	secret := []byte(sessionSecret)
 
 	secureCookies := os.Getenv("SECURE_COOKIES") == "true"
+	if !secureCookies {
+		log.Println("WARNING: SECURE_COOKIES is false — session cookies will not be marked Secure. Set SECURE_COOKIES=true when serving over HTTPS.")
+	}
 	trustProxy := os.Getenv("TRUST_PROXY_HEADERS") == "true"
 
 	// ── Background context (cancels goroutines on shutdown) ───────────────────
