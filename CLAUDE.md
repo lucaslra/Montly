@@ -11,6 +11,7 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 - `make up` — build image and start (standard)
 - `make dev-backend` + `make dev-frontend` — local dev (two terminals; Vite proxies /api to :8080)
 - `make setup` — first-time: go mod tidy + npm install
+- `make test` — run all tests (Go + frontend Vitest)
 
 ## Key conventions
 - All SQLite queries and migrations live in `backend/db.go`; migrations use idempotent ALTER TABLE
@@ -18,6 +19,15 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 - Frontend API calls are centralized in `frontend/src/api.js`
 - Receipt files are uuid-named and stored in DATA_DIR/receipts/; unchecking a task removes the receipt AND the file
 - A mobile app will be added in the future — keep API design flexible
+
+## Testing
+- **Backend:** `cd backend && go test ./...` — covers auth, DB scoping, migrations
+- **Frontend:** `cd frontend && npm test` — Vitest + jsdom + Testing Library; tests live in `frontend/src/test/`
+  - `TaskForm.test.jsx` — form rendering, validation, submit, cancel
+  - `MonthPicker.test.jsx` — popover, inline, year nav, clear
+  - `TaskList.test.jsx` — toggle, receipt confirm, PaymentSlot amount editing
+  - `LoginView.test.jsx` — credentials, error display, loading state
+  - `api.test.js` — HTTP layer: status codes, error handling, request shape
 
 ## Available agents
 Use these for focused reviews (invoke via subagent):

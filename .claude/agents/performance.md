@@ -34,4 +34,9 @@ Areas to analyze:
 - Layer caching: are dependencies copied before source so rebuilds reuse cache?
 - Final image size
 
+**Test suite**
+- Frontend tests use Vitest + jsdom (`frontend/src/test/`); 63 tests across 5 files
+- Backend tests use `go test` (`backend/*_test.go`)
+- Flag slow tests or tests that do expensive setup on every case
+
 When reporting, estimate the impact (high/medium/low) and distinguish premature optimization from real gains given the app's scale (single-user, <1000 tasks).
