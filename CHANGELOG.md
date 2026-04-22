@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] — 2026-04-22
+
+### Added
+- README with feature list, quick-start, API overview, and deployment links
+- LICENSE (MIT)
+- Frontend test suite: 63 tests with Vitest + jsdom + Testing Library
+  - `TaskForm` — rendering, amount/date validation, submit, cancel, Escape
+  - `MonthPicker` — popover, inline, year navigation, clear
+  - `TaskList` — toggle, receipt confirm dialog, PaymentSlot amount editing
+  - `LoginView` — credentials, error display, loading state
+  - `api.js` — HTTP status handling, request shape, AbortSignal
+- GitHub Actions CI pipeline — backend tests, frontend tests, Docker build (on every push)
+- GitHub Actions release pipeline — builds and pushes Docker image to ghcr.io, creates GitHub release (on `v*.*.*` tags)
+- `make test` — runs both backend and frontend test suites
+
+### Fixed
+- `backend/dist/index.html` placeholder now tracked in git so `go:embed dist` works in CI and fresh clones
+- `.gitignore` pattern changed from `backend/dist/` to `backend/dist/*` to allow the `!backend/dist/index.html` negation to take effect
+
+### Changed
+- Go version bumped to 1.25 across all documentation and agent definitions
+- `/review` command updated to launch all six specialist agents (added mobile)
+- `TRUST_PROXY_HEADERS` added to the deployment guide environment variable table
+
 ## [0.1.0] — 2026-04-22
 
 Initial release.
