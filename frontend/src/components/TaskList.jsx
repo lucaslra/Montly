@@ -1,6 +1,6 @@
 import { memo, useRef, useState } from 'react'
 
-const ACCEPT = '.pdf,.txt,.jpg,.jpeg,.png,.webp,.gif'
+const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.gif'
 
 const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', uploadingTaskId, onToggle, onUploadReceipt, onRemoveReceipt, onUpdateCompletion, onGoToManage }) {
   const [confirmUndo, setConfirmUndo] = useState(null)
@@ -171,6 +171,7 @@ function PaymentSlot({ taskId, taskType, defaultAmount, completion, currency = '
                 onKeyDown={handleKeyDown}
                 autoFocus
                 inputMode="decimal"
+                autoComplete="off"
                 placeholder={defaultAmount || '0.00'}
                 aria-describedby={amountError ? `amount-error-${taskId}` : undefined}
               />

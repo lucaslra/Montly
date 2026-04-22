@@ -27,7 +27,8 @@ func securityHeaders(secure bool) func(http.Handler) http.Handler {
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			w.Header().Set("Content-Security-Policy",
-				"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:")
+				"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'")
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 			if secure {
 				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
@@ -36,25 +37,16 @@ func securityHeaders(secure bool) func(http.Handler) http.Handler {
 	}
 }
 
-func recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Printf("panic: %v", err)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"error":"internal server error"}`))
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
-
 func main() {
 	// ── Database ──────────────────────────────────────────────────────────────
 	dbType := os.Getenv("DB_TYPE")
 	if dbType == "" {
 		dbType = "sqlite"
+	}
+
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
 	}
 
 	var dbDSN string
@@ -65,10 +57,6 @@ func main() {
 			log.Fatal("DATABASE_URL is required when DB_TYPE=postgres")
 		}
 	case "sqlite":
-		dataDir := os.Getenv("DATA_DIR")
-		if dataDir == "" {
-			dataDir = "./data"
-		}
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			log.Fatalf("create data dir: %v", err)
 		}
@@ -127,10 +115,6 @@ func main() {
 	}
 
 	// ── Files & receipts ──────────────────────────────────────────────────────
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
-	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Fatalf("create data dir: %v", err)
 	}
@@ -152,6 +136,9 @@ func main() {
 	secret := []byte(sessionSecret)
 
 	secureCookies := os.Getenv("SECURE_COOKIES") == "true"
+	if !secureCookies {
+		log.Println("WARNING: SECURE_COOKIES is false — session cookies will not be marked Secure. Set SECURE_COOKIES=true when serving over HTTPS.")
+	}
 	trustProxy := os.Getenv("TRUST_PROXY_HEADERS") == "true"
 
 	// ── Background context (cancels goroutines on shutdown) ───────────────────
@@ -168,7 +155,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(securityHeaders(secureCookies))
-	r.Use(recoverer)
+	r.Use(middleware.Recoverer)
 
 	mountRoutes := func(r chi.Router) {
 		// Add API version header to all API responses.
@@ -243,9 +230,11 @@ func spaHandler(fsys fs.FS) http.Handler {
 		if clean == "." {
 			clean = "index.html"
 		}
-		if _, err := fsys.Open(clean); err != nil {
+		if f, err := fsys.Open(clean); err != nil {
 			http.ServeFileFS(w, r, fsys, "index.html")
 			return
+		} else {
+			f.Close()
 		}
 		fileServer.ServeHTTP(w, r)
 	})

@@ -233,23 +233,36 @@ func migrate(db *sql.DB) error {
 	if notNull == 1 {
 		db.Exec(`PRAGMA foreign_keys = OFF`)
 		tx, err := db.Begin()
-		if err == nil {
-			tx.Exec(`ALTER TABLE tasks RENAME TO tasks_old`)
-			tx.Exec(`CREATE TABLE tasks (
-				id          INTEGER PRIMARY KEY AUTOINCREMENT,
-				title       TEXT    NOT NULL,
-				description TEXT    NOT NULL DEFAULT '',
-				type        TEXT    NOT NULL DEFAULT '',
-				metadata    TEXT    NOT NULL DEFAULT '{}',
-				created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-				start_date  TEXT,
-				end_date    TEXT,
-				user_id     INTEGER REFERENCES users(id),
-				interval    INTEGER NOT NULL DEFAULT 1
-			)`)
-			tx.Exec(`INSERT INTO tasks SELECT id,title,description,type,metadata,created_at,NULLIF(start_date,''),NULLIF(end_date,''),user_id,COALESCE(interval,1) FROM tasks_old`)
-			tx.Exec(`DROP TABLE tasks_old`)
-			tx.Commit()
+		if err != nil {
+			db.Exec(`PRAGMA foreign_keys = ON`)
+			return fmt.Errorf("begin tasks rebuild tx: %w", err)
+		}
+		defer tx.Rollback() //nolint:errcheck
+		if _, err := tx.Exec(`ALTER TABLE tasks RENAME TO tasks_old`); err != nil {
+			return fmt.Errorf("rename tasks: %w", err)
+		}
+		if _, err := tx.Exec(`CREATE TABLE tasks (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			title       TEXT    NOT NULL,
+			description TEXT    NOT NULL DEFAULT '',
+			type        TEXT    NOT NULL DEFAULT '',
+			metadata    TEXT    NOT NULL DEFAULT '{}',
+			created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+			start_date  TEXT,
+			end_date    TEXT,
+			user_id     INTEGER REFERENCES users(id),
+			interval    INTEGER NOT NULL DEFAULT 1
+		)`); err != nil {
+			return fmt.Errorf("create tasks: %w", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO tasks SELECT id,title,description,type,metadata,created_at,NULLIF(start_date,''),NULLIF(end_date,''),user_id,COALESCE(interval,1) FROM tasks_old`); err != nil {
+			return fmt.Errorf("migrate tasks data: %w", err)
+		}
+		if _, err := tx.Exec(`DROP TABLE tasks_old`); err != nil {
+			return fmt.Errorf("drop tasks_old: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit tasks rebuild: %w", err)
 		}
 		db.Exec(`PRAGMA foreign_keys = ON`)
 	}
@@ -261,19 +274,32 @@ func migrate(db *sql.DB) error {
 	if fkTable == "tasks_old" {
 		db.Exec(`PRAGMA foreign_keys = OFF`)
 		tx, err := db.Begin()
-		if err == nil {
-			tx.Exec(`ALTER TABLE completions RENAME TO completions_old`)
-			tx.Exec(`CREATE TABLE completions (
-				task_id      INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-				month        TEXT    NOT NULL,
-				completed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-				receipt_file TEXT    NOT NULL DEFAULT '',
-				amount       TEXT    NOT NULL DEFAULT '',
-				PRIMARY KEY (task_id, month)
-			)`)
-			tx.Exec(`INSERT INTO completions SELECT * FROM completions_old`)
-			tx.Exec(`DROP TABLE completions_old`)
-			tx.Commit()
+		if err != nil {
+			db.Exec(`PRAGMA foreign_keys = ON`)
+			return fmt.Errorf("begin completions repair tx: %w", err)
+		}
+		defer tx.Rollback() //nolint:errcheck
+		if _, err := tx.Exec(`ALTER TABLE completions RENAME TO completions_old`); err != nil {
+			return fmt.Errorf("rename completions: %w", err)
+		}
+		if _, err := tx.Exec(`CREATE TABLE completions (
+			task_id      INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			month        TEXT    NOT NULL,
+			completed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+			receipt_file TEXT    NOT NULL DEFAULT '',
+			amount       TEXT    NOT NULL DEFAULT '',
+			PRIMARY KEY (task_id, month)
+		)`); err != nil {
+			return fmt.Errorf("create completions: %w", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO completions SELECT * FROM completions_old`); err != nil {
+			return fmt.Errorf("migrate completions data: %w", err)
+		}
+		if _, err := tx.Exec(`DROP TABLE completions_old`); err != nil {
+			return fmt.Errorf("drop completions_old: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit completions repair: %w", err)
 		}
 		db.Exec(`PRAGMA foreign_keys = ON`)
 	}
@@ -292,10 +318,14 @@ func migrate(db *sql.DB) error {
 func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 	// Check if user_id column already exists.
 	var hasUserID int
+	var row *sql.Row
 	if db.driver == "postgres" {
-		db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_name='settings' AND column_name='user_id'`).Scan(&hasUserID)
+		row = db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_name='settings' AND column_name='user_id'`)
 	} else {
-		db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='user_id'`).Scan(&hasUserID)
+		row = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='user_id'`)
+	}
+	if err := row.Scan(&hasUserID); err != nil {
+		return fmt.Errorf("check settings schema: %w", err)
 	}
 	if hasUserID > 0 {
 		return nil // already migrated
@@ -446,7 +476,11 @@ func scanTask(row *sql.Row) (Task, error) {
 }
 
 // monthIndex converts a YYYY-MM string to a monotonic integer (year*12 + month - 1).
+// The caller must ensure month is a valid YYYY-MM string (validated by isValidYearMonth).
 func monthIndex(month string) int {
+	if len(month) < 7 {
+		return 0
+	}
 	year, _ := strconv.Atoi(month[:4])
 	mon, _ := strconv.Atoi(month[5:])
 	return year*12 + mon - 1
