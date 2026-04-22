@@ -3,7 +3,7 @@
 Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite frontend, deployed via Docker.
 
 ## Stack
-- **Backend:** Go 1.22, Chi router, modernc.org/sqlite (pure Go, no CGO)
+- **Backend:** Go 1.25, Chi router, modernc.org/sqlite (pure Go, no CGO)
 - **Frontend:** React 19 + Vite, plain CSS, hooks pattern
 - **Infra:** Multi-stage Dockerfile, docker-compose, Makefile
 
@@ -29,4 +29,4 @@ Use these for focused reviews (invoke via subagent):
 - **mobile** — touch targets, viewport behaviour, iOS/Android quirks, PWA readiness
 
 ## Slash commands
-- `/review` — runs all five review agents in parallel and produces a single prioritised report
+- `/review` — runs all six review agents in parallel and produces a single prioritised report

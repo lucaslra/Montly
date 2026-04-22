@@ -79,7 +79,7 @@ func TestTaskScoping(t *testing.T) {
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
 	// Use an explicit start_date so the task always appears regardless of when the test runs.
-	_, err := db.CreateTask("Alice task", "", "", "2020-01", "", nil, alice.ID)
+	_, err := db.CreateTask("Alice task", "", "", "2020-01", "", nil, alice.ID, 1)
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestCompletionScoping(t *testing.T) {
 	alice, _ := db.CreateUser("alice", testHash(t), false)
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
-	task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, alice.ID)
+	task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, alice.ID, 1)
 	_, err := db.AddCompletion(task.ID, "2026-04")
 	if err != nil {
 		t.Fatalf("add completion: %v", err)
