@@ -168,21 +168,38 @@ export default function App() {
   }, [])
 
   const handleToggle = useCallback(async (taskId) => {
+    // Optimistic update: flip completion state immediately for snappy UI.
+    const wasCompleted = completionMap.has(taskId)
+    const prevEntry    = completionMap.get(taskId)
+    setCompletionMap(prev => {
+      const next = new Map(prev)
+      if (wasCompleted) { next.delete(taskId) }
+      else { next.set(taskId, { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '' }) }
+      return next
+    })
     try {
       const { completed } = await toggleCompletion(taskId, month)
+      // Sync with definitive server state (covers edge cases like concurrent edits).
       setCompletionMap(prev => {
         const next = new Map(prev)
         if (completed) {
-          next.set(taskId, { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '' })
+          next.set(taskId, prev.get(taskId) ?? { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '' })
         } else {
           next.delete(taskId)
         }
         return next
       })
     } catch (e) {
+      // Revert to pre-toggle state on failure.
+      setCompletionMap(prev => {
+        const next = new Map(prev)
+        if (wasCompleted && prevEntry) { next.set(taskId, prevEntry) }
+        else { next.delete(taskId) }
+        return next
+      })
       onApiError(e)
     }
-  }, [month, onApiError])
+  }, [month, completionMap, onApiError])
 
   const handleUploadReceipt = useCallback(async (taskId, file) => {
     setUploadingTaskId(taskId)

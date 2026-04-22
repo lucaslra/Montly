@@ -65,6 +65,8 @@ function PasswordSection() {
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState(null)
   const [success, setSuccess] = useState(false)
+  const [showPw, setShowPw]   = useState(false)
+  const pwType = showPw ? 'text' : 'password'
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -92,15 +94,19 @@ function PasswordSection() {
       <form onSubmit={handleSubmit} className="settings-sub-form">
         <div className="form-group">
           <label htmlFor="pw-current">Current password</label>
-          <input id="pw-current" type="password" value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" required />
+          <input id="pw-current" type={pwType} value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" required />
         </div>
         <div className="form-group">
           <label htmlFor="pw-new">New password</label>
-          <input id="pw-new" type="password" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" required />
+          <input id="pw-new" type={pwType} value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" required />
         </div>
         <div className="form-group">
           <label htmlFor="pw-confirm">Confirm new password</label>
-          <input id="pw-confirm" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" required />
+          <input id="pw-confirm" type={pwType} value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" required />
+        </div>
+        <div className="form-group form-group-inline">
+          <input id="pw-show" type="checkbox" checked={showPw} onChange={e => setShowPw(e.target.checked)} />
+          <label htmlFor="pw-show">Show passwords</label>
         </div>
         <button type="submit" className="btn-primary" disabled={saving}>
           {saving ? 'Saving…' : 'Update password'}

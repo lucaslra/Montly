@@ -106,6 +106,7 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
   const [interval, setInterval] = useState(task?.interval ?? 1)
   const [saving, setSaving] = useState(false)
   const [dateError, setDateError] = useState('')
+  const [amountError, setAmountError] = useState('')
   const modalRef = useRef(null)
 
   useEffect(() => {
@@ -150,10 +151,15 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
   async function handleSubmit(e) {
     e.preventDefault()
     if (!title.trim()) return
+    if (amount.trim() !== '' && isNaN(Number(amount.trim()))) {
+      setAmountError('Amount must be a number')
+      return
+    }
     if (startDate && endDate && startDate > endDate) {
       setDateError('Start date must be on or before end date')
       return
     }
+    setAmountError('')
     setDateError('')
     setSaving(true)
     try {
@@ -218,11 +224,13 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
                     type="text"
                     inputMode="decimal"
                     value={amount}
-                    onChange={e => setAmount(e.target.value)}
+                    onChange={e => { setAmount(e.target.value); setAmountError('') }}
                     placeholder="0.00"
                     className="input-with-prefix"
+                    aria-describedby={amountError ? 'task-amount-error' : undefined}
                   />
                 </div>
+                {amountError && <p id="task-amount-error" className="form-error" role="alert">{amountError}</p>}
               </div>
             </div>
           )}
