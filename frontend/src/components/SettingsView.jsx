@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   changePassword,
   fetchTokens, createToken, revokeToken,
@@ -145,6 +145,7 @@ function TokensSection() {
   const [name, setName]       = useState('')
   const [creating, setCreating] = useState(false)
   const [revealed, setRevealed] = useState(null) // plaintext after create
+  const [copied, setCopied]   = useState(false)
   const [error, setError]     = useState(null)
   const [confirmRevokeId, setConfirmRevokeId] = useState(null)
 
@@ -192,10 +193,14 @@ function TokensSection() {
             <code>{revealed}</code>
             <button
               className="btn-secondary btn-sm"
-              onClick={() => navigator.clipboard?.writeText(revealed)}
+              onClick={() => {
+                navigator.clipboard?.writeText(revealed)
+                setCopied(true)
+                setTimeout(() => setCopied(false), 2000)
+              }}
               title="Copy to clipboard"
             >
-              Copy
+              {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
           <button className="btn-link" onClick={() => setRevealed(null)}>Dismiss</button>
@@ -360,6 +365,7 @@ export default function SettingsView({ settings, onSave, user }) {
   const [saving,  setSaving]  = useState(false)
   const [savedAt, setSavedAt] = useState(null)
   const [error,   setError]   = useState(null)
+  const savedAtTimer = useRef(null)
 
   useEffect(() => { setColorMode(settings.color_mode ?? 'system') }, [settings.color_mode])
 
@@ -383,6 +389,8 @@ export default function SettingsView({ settings, onSave, user }) {
         fiscal_year_start: fiscalYearStart, number_format: numberFormat,
       })
       setSavedAt(new Date().toLocaleTimeString('default', { hour: '2-digit', minute: '2-digit' }))
+      clearTimeout(savedAtTimer.current)
+      savedAtTimer.current = setTimeout(() => setSavedAt(null), 30_000)
     } catch (err) {
       setError(err.message ?? 'Failed to save settings')
     } finally {

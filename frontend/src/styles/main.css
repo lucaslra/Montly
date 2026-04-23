@@ -147,7 +147,8 @@ body {
   justify-content: center;
   transition: border-color 0.15s, color 0.15s;
 }
-.settings-btn:hover { border-color: var(--primary); color: var(--primary); }
+.settings-btn:hover  { border-color: var(--primary); color: var(--primary); }
+.settings-btn.active { border-color: var(--primary); color: var(--primary); background: var(--hover); }
 
 .theme-toggle-btn {
   width: 44px;
@@ -233,8 +234,9 @@ body {
 
 .btn-sm {
   font-size: 0.8125rem;
-  padding: 6px 12px;
+  padding: 5px 10px;
   white-space: nowrap;
+  min-height: 44px;
 }
 
 /* ── Progress ─────────────────────────────────────── */
@@ -830,8 +832,8 @@ body {
   transition: border-color 0.15s, color 0.15s;
 }
 .receipt-remove-btn:hover {
-  border-color: #e53e3e;
-  color: #e53e3e;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* ── Payment type fields ─────────────────────────── */
@@ -1107,8 +1109,7 @@ body {
 .form-error {
   font-size: 0.8125rem;
   color: var(--danger);
-  margin-top: -8px;
-  margin-bottom: 6px;
+  margin: 0 0 8px;
 }
 
 /* fix 7: optional field label hint */
@@ -1216,7 +1217,6 @@ body {
 .form-group-inline label {
   margin: 0;
 }
-.form-error  { font-size: 0.8125rem; color: var(--danger);  margin: 0 0 8px; }
 .form-success { font-size: 0.8125rem; color: var(--success); margin: 0 0 8px; }
 
 /* ── Token reveal box ────────────────────────────── */
@@ -1309,8 +1309,7 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* ── Small button variant ────────────────────────── */
-.btn-sm { font-size: 0.8125rem; padding: 5px 10px; }
+/* ── Small button variant defined above ─────────── */
 
 /* ── Report view ─────────────────────────────────── */
 .report-view {
