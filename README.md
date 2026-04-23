@@ -1,5 +1,7 @@
 # Montly
 
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+
 Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI.
 
 ## Features
@@ -9,6 +11,7 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 - **Completion tracking** — mark tasks done per month, attach receipt files (PDF, image)
 - **Amount logging** — record the actual amount paid per completion
 - **Reports** — monthly spending bar chart with 6-month history and 3-month forecast, category donut chart, and stat cards (YTD/fiscal-year-to-date, monthly average, peak month, next forecast)
+- **Webhooks** — receive HTTP POST notifications on task completion and uncompletion
 - **Multi-user** — isolated data per user; admin can create/delete accounts
 - **First-run setup** — create the admin account through the UI on first access; no env vars needed
 - **API tokens** — headless / mobile client access via `Bearer mt_…` tokens
@@ -18,7 +21,11 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 
 ## Quick start
 
+**Requires:** Docker with Compose v2 (`docker compose`).
+
 ```bash
+git clone <repo-url>
+cd montly
 docker compose up -d
 ```
 
@@ -28,6 +35,8 @@ Open `http://localhost:8080` — on first access you'll be prompted to create th
 
 ## Development
 
+**Requires:** Go 1.25+, Node 18+.
+
 Two-terminal workflow (Vite proxies `/api` to `:8080`):
 
 ```bash
@@ -36,7 +45,13 @@ make dev-backend    # terminal 1 — Go API on :8080
 make dev-frontend   # terminal 2 — Vite dev server on :5173
 ```
 
-Or build and run via Docker:
+Run tests:
+
+```bash
+make test
+```
+
+Or build and run the full stack via Docker:
 
 ```bash
 make up
@@ -55,6 +70,8 @@ make up
 All endpoints live under `/api` and `/api/v1` (both are equivalent). Authenticate with a session cookie (web UI) or an `Authorization: Bearer mt_<token>` header (API tokens).
 
 ```
+POST   /api/auth/login
+POST   /api/auth/logout
 GET    /api/auth/setup                           — {"needs_setup": bool}, public
 POST   /api/auth/setup                           — create first admin + open session
 GET    /api/auth/me
@@ -79,7 +96,7 @@ GET    /api/auth/tokens
 POST   /api/auth/tokens
 DELETE /api/auth/tokens/:id
 
-GET    /api/webhooks                             — list webhooks (events: task.completed, task.uncompleted)
+GET    /api/webhooks                             — events: task.completed, task.uncompleted
 POST   /api/webhooks
 DELETE /api/webhooks/:id
 
@@ -102,6 +119,14 @@ See **[docs/deployment.md](docs/deployment.md)** for:
 - PostgreSQL backend
 - Backup procedures
 - Security checklist
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
+
+To report a security vulnerability privately, use the process described in [SECURITY.md](SECURITY.md).
+
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md) code of conduct.
 
 ## License
 
