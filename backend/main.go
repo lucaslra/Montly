@@ -27,7 +27,7 @@ func securityHeaders(secure bool) func(http.Handler) http.Handler {
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			w.Header().Set("Content-Security-Policy",
-				"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'")
+				"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests")
 			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 			if secure {
 				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -176,7 +176,7 @@ func main() {
 
 		// Protected
 		r.Group(func(r chi.Router) {
-			r.Use(requireAuth(secret, db))
+			r.Use(requireAuth(secret, db, secureCookies))
 			r.Get("/auth/me", ah.Me)
 			r.Patch("/auth/password", ah.ChangePassword)
 			r.Get("/auth/tokens", th.ListTokens)

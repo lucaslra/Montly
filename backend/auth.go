@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,7 +45,15 @@ const (
 
 // dummyHash is used to perform a constant-time bcrypt comparison when a
 // username is not found, preventing user-enumeration via response timing.
-var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("_dummy_"), bcrypt.DefaultCost)
+var dummyHash []byte
+
+func init() {
+	var err error
+	dummyHash, err = bcrypt.GenerateFromPassword([]byte("_dummy_"), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatalf("bcrypt init: %v", err)
+	}
+}
 
 func newSession(claims sessionClaims, secret []byte) (string, error) {
 	payload, err := json.Marshal(claims)
@@ -95,18 +104,20 @@ func setSession(w http.ResponseWriter, claims sessionClaims, secret []byte, secu
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(sessionDuration.Seconds()),
 	})
 	return nil
 }
 
-func clearSession(w http.ResponseWriter) {
+func clearSession(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})
 }
@@ -115,7 +126,7 @@ func clearSession(w http.ResponseWriter) {
 
 // requireAuth validates the session cookie or Bearer token and injects claims
 // into the request context.
-func requireAuth(secret []byte, db *DB) func(http.Handler) http.Handler {
+func requireAuth(secret []byte, db *DB, secure bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. Bearer token (for API clients / mobile).
@@ -151,7 +162,7 @@ func requireAuth(secret []byte, db *DB) func(http.Handler) http.Handler {
 			}
 			claims, ok := parseSession(cookie.Value, secret)
 			if !ok {
-				clearSession(w)
+				clearSession(w, secure)
 				writeError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -195,6 +206,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10) // 4 KB — ample for any valid login payload
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -205,6 +217,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Username == "" || req.Password == "" {
 		writeError(w, "username and password required", http.StatusBadRequest)
+		return
+	}
+	// Reject oversized inputs before hitting the database or bcrypt.
+	if len(req.Username) > 200 || len(req.Password) > 200 {
+		bcrypt.CompareHashAndPassword(dummyHash, []byte("_"))
+		h.rl.recordFailure(ip)
+		writeError(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
@@ -248,6 +267,13 @@ func (h *AuthHandler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 // Setup creates the first admin account and opens a session.
 // Returns 409 Conflict if any user already exists.
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
+	// Rate-limit setup attempts to prevent brute-force during the first-run window.
+	ip := clientIP(r, h.trustProxy)
+	if !h.rl.allow(ip) {
+		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	n, err := h.db.CountUsers()
 	if err != nil {
 		writeServerError(w, "failed to check setup status", err)
@@ -258,6 +284,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -268,6 +295,10 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Username == "" {
 		writeError(w, "username is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Username) > 64 {
+		writeError(w, "username must be 64 characters or fewer", http.StatusBadRequest)
 		return
 	}
 	if len(req.Password) < 8 {
@@ -282,6 +313,11 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 	admin, err := h.db.CreateUser(req.Username, string(hash), true)
 	if err != nil {
+		// A concurrent setup request can win the race and hit the UNIQUE constraint.
+		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "unique") {
+			writeError(w, "already set up", http.StatusConflict)
+			return
+		}
 		writeServerError(w, "failed to create admin user", err)
 		return
 	}
@@ -301,7 +337,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	clearSession(w)
+	clearSession(w, h.secure)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -309,7 +345,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	claims := currentUser(r)
 	user, err := h.db.GetUserByID(claims.UserID)
 	if err != nil {
-		clearSession(w)
+		clearSession(w, h.secure)
 		writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -317,6 +353,14 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	// Rate-limit to prevent brute-forcing the current password.
+	ip := clientIP(r, h.trustProxy)
+	if !h.rl.allow(ip) {
+		writeError(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	var req struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
@@ -332,13 +376,17 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.db.GetUserByID(currentUser(r).UserID)
 	if err != nil {
-		writeServerError(w, "user not found", err)
+		// Session is valid but user was deleted — force logout.
+		clearSession(w, h.secure)
+		writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		h.rl.recordFailure(ip)
 		writeError(w, "current password is incorrect", http.StatusBadRequest)
 		return
 	}
+	h.rl.recordSuccess(ip)
 
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
