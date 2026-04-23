@@ -540,7 +540,6 @@ body {
   font-family: inherit;
   background: var(--surface);
   color: var(--text);
-  outline: none;
   transition: border-color 0.15s;
 }
 .form-group input:focus  { border-color: var(--primary); }
@@ -554,7 +553,6 @@ body {
   font-family: inherit;
   background: var(--surface);
   color: var(--text);
-  outline: none;
   cursor: pointer;
   transition: border-color 0.15s;
 }
@@ -586,7 +584,7 @@ body {
   transition: border-color 0.15s;
 }
 .mp-trigger:hover,
-.mp-trigger:focus-visible { border-color: var(--primary); outline: none; }
+.mp-trigger:focus-visible { border-color: var(--primary); }
 .mp-trigger--empty .mp-placeholder { color: var(--muted); }
 
 .mp-panel {
@@ -751,7 +749,6 @@ body {
   font-family: inherit;
   background: var(--surface);
   color: var(--text);
-  outline: none;
 }
 
 .amount-confirm-btn,
@@ -864,7 +861,6 @@ body {
   flex: 1;
   border: none !important;
   border-radius: 0 !important;
-  outline: none;
   padding: 9px 12px;
   font-size: 1rem;
   font-family: inherit;

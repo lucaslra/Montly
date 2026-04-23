@@ -111,8 +111,8 @@ function PasswordSection() {
   return (
     <section className="settings-section-block">
       <h3 className="settings-section-title">Change Password</h3>
-      {error   && <p className="form-error">{error}</p>}
-      {success && <p className="form-success">Password updated.</p>}
+      {error   && <p className="form-error" role="alert">{error}</p>}
+      {success && <p className="form-success" role="status">Password updated.</p>}
       <form onSubmit={handleSubmit} className="settings-sub-form">
         <div className="form-group">
           <label htmlFor="pw-current">Current password</label>
@@ -183,7 +183,7 @@ function TokensSection() {
   return (
     <section className="settings-section-block">
       <h3 className="settings-section-title">API Tokens</h3>
-      {error && <p className="form-error">{error}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
 
       {revealed && (
         <div className="token-reveal">
@@ -231,7 +231,7 @@ function TokensSection() {
                 </span>
               </div>
               {confirmRevokeId === tok.id ? (
-                <span className="delete-confirm" role="status" aria-live="polite" aria-atomic="true">
+                <span className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
                   <span className="delete-confirm-label">Revoke?</span>
                   <button className="btn-icon btn-danger btn-sm" onClick={() => handleRevoke(tok.id)}>Yes</button>
                   <button className="btn-icon btn-sm" onClick={() => setConfirmRevokeId(null)}>No</button>
@@ -293,7 +293,7 @@ function UsersSection({ currentUserId }) {
   return (
     <section className="settings-section-block">
       <h3 className="settings-section-title">Users</h3>
-      {error && <p className="form-error">{error}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
 
       <form onSubmit={handleCreate} className="settings-sub-form">
         <div className="form-group">
@@ -328,7 +328,7 @@ function UsersSection({ currentUserId }) {
               </div>
               {u.id !== currentUserId && (
                 confirmDeleteId === u.id ? (
-                  <span className="delete-confirm" role="status" aria-live="polite" aria-atomic="true">
+                  <span className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
                     <span className="delete-confirm-label">Delete?</span>
                     <button className="btn-icon btn-danger btn-sm" onClick={() => handleDelete(u.id)}>Yes</button>
                     <button className="btn-icon btn-sm" onClick={() => setConfirmDeleteId(null)}>No</button>
@@ -398,7 +398,7 @@ export default function SettingsView({ settings, onSave, user }) {
       {error && (
         <div className="error-banner">
           <span>{error}</span>
-          <button className="error-dismiss" onClick={() => setError(null)} title="Dismiss">✕</button>
+          <button className="error-dismiss" onClick={() => setError(null)} title="Dismiss" aria-label="Dismiss error">✕</button>
         </div>
       )}
 
@@ -484,7 +484,7 @@ export default function SettingsView({ settings, onSave, user }) {
 
         {/* fix 3 + 6 + 8 */}
         <div className="settings-save-row">
-          <span className="settings-save-status">
+          <span className="settings-save-status" aria-live="polite">
             {isDirty
               ? <span className="settings-dirty">Unsaved changes</span>
               : savedAt
