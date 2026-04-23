@@ -1,8 +1,23 @@
 # Montly
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](docs/deployment.md)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-✓-4CAF50)](docs/deployment.md)
 
 Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/tasks.png" alt="Task list" width="420"/></td>
+    <td><img src="docs/screenshots/reports.png" alt="Reports" width="420"/></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Task list — monthly overview with progress and amounts</em></td>
+    <td align="center"><em>Reports — spending history, forecast, and category breakdown</em></td>
+  </tr>
+</table>
 
 ## Features
 
