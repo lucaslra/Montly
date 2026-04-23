@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -932,4 +933,419 @@ func TestIsAllowedMIME(t *testing.T) {
 			t.Errorf("isAllowedMIME(%q): expected false", m)
 		}
 	}
+}
+
+// ── Phase 3: security, auth middleware, remaining handler gaps ────────────────
+
+// ── safeRemoveReceipt ─────────────────────────────────────────────────────────
+
+func TestSafeRemoveReceipt(t *testing.T) {
+	t.Run("removes a file with a valid UUID filename", func(t *testing.T) {
+		dir := t.TempDir()
+		name := "550e8400-e29b-41d4-a716-446655440000.pdf"
+		path := dir + "/" + name
+		if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		safeRemoveReceipt(dir, name)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Error("expected file to be removed")
+		}
+	})
+
+	t.Run("no-op for empty filename", func(t *testing.T) {
+		dir := t.TempDir()
+		// Should not panic or error.
+		safeRemoveReceipt(dir, "")
+	})
+
+	t.Run("no-op for non-UUID filename (path traversal attempt)", func(t *testing.T) {
+		dir := t.TempDir()
+		// Write a file with a non-UUID name — safeRemoveReceipt must not touch it.
+		name := "important.txt"
+		path := dir + "/" + name
+		if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		safeRemoveReceipt(dir, "../"+name)
+		safeRemoveReceipt(dir, name) // also test without traversal — still blocked
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Error("non-UUID file should not have been removed")
+		}
+	})
+}
+
+// ── parseTaskBody additional paths ───────────────────────────────────────────
+
+func TestParseTaskBody(t *testing.T) {
+	t.Run("400 when description exceeds 5000 characters", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/tasks",
+			fmt.Sprintf(`{"title":"T","description":%q}`, strings.Repeat("x", 5001)),
+			alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when start_date has wrong format", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/tasks",
+			`{"title":"T","start_date":"01/2026"}`, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when end_date has wrong format", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/tasks",
+			`{"title":"T","end_date":"2026/04"}`, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("valid start_date and end_date are accepted", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/tasks",
+			`{"title":"T","start_date":"2026-01","end_date":"2026-12"}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusCreated)
+		var task map[string]any
+		decodeJSON(t, w, &task)
+		if task["start_date"] != "2026-01" {
+			t.Errorf("start_date: got %q", task["start_date"])
+		}
+		if task["end_date"] != "2026-12" {
+			t.Errorf("end_date: got %q", task["end_date"])
+		}
+	})
+}
+
+// ── requireAuth: Bearer token path ───────────────────────────────────────────
+
+func TestRequireAuth_BearerToken(t *testing.T) {
+	t.Run("accepts a valid API token via Authorization header", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+
+		// Create a token directly in the DB so we know the plaintext.
+		plaintext := "mt_testtoken123"
+		hash := sha256hex(plaintext)
+		ts.db.CreateToken(alice.ID, "test", hash)
+
+		req := ts.req(t, http.MethodGet, "/api/auth/me", "")
+		req.Header.Set("Authorization", "Bearer "+plaintext)
+		w := ts.do(req)
+		assertStatus(t, w, http.StatusOK)
+		var resp map[string]any
+		decodeJSON(t, w, &resp)
+		if resp["username"] != "alice" {
+			t.Errorf("username: got %q, want alice", resp["username"])
+		}
+	})
+
+	t.Run("401 with an invalid Bearer token", func(t *testing.T) {
+		ts := newTestServer(t)
+		req := ts.req(t, http.MethodGet, "/api/auth/me", "")
+		req.Header.Set("Authorization", "Bearer invalidtoken")
+		w := ts.do(req)
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+}
+
+// ── requireAdmin middleware ───────────────────────────────────────────────────
+
+func TestRequireAdmin(t *testing.T) {
+	t.Run("403 when non-admin accesses admin-only endpoint", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false) // not admin
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/users", "", alice.ID, false))
+		assertStatus(t, w, http.StatusForbidden)
+	})
+
+	t.Run("admin can access admin-only endpoint", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/users", "", admin.ID, true))
+		assertStatus(t, w, http.StatusOK)
+	})
+}
+
+// ── Admin user management ─────────────────────────────────────────────────────
+
+func TestListUsers(t *testing.T) {
+	ts := newTestServer(t)
+	admin := ts.mustUser(t, "admin", true)
+	ts.mustUser(t, "alice", false)
+	ts.mustUser(t, "bob", false)
+
+	w := ts.do(ts.authReq(t, http.MethodGet, "/api/users", "", admin.ID, true))
+	assertStatus(t, w, http.StatusOK)
+	var users []map[string]any
+	decodeJSON(t, w, &users)
+	if len(users) != 3 {
+		t.Errorf("got %d users, want 3", len(users))
+	}
+	// Password hash must never be in the response.
+	for _, u := range users {
+		if _, ok := u["password_hash"]; ok {
+			t.Error("password_hash must not be serialised")
+		}
+	}
+}
+
+func TestAdminCreateUser(t *testing.T) {
+	t.Run("admin creates a new user", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/users",
+			`{"username":"newuser","password":"password123","is_admin":false}`,
+			admin.ID, true))
+		assertStatus(t, w, http.StatusCreated)
+		var u map[string]any
+		decodeJSON(t, w, &u)
+		if u["username"] != "newuser" {
+			t.Errorf("username: got %q", u["username"])
+		}
+		if u["is_admin"].(bool) {
+			t.Error("expected is_admin=false")
+		}
+	})
+
+	t.Run("409 on duplicate username", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		ts.mustUser(t, "existing", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/users",
+			`{"username":"existing","password":"password123"}`,
+			admin.ID, true))
+		assertStatus(t, w, http.StatusConflict)
+	})
+
+	t.Run("400 when password is too short", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/users",
+			`{"username":"newuser","password":"short"}`,
+			admin.ID, true))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when username is empty", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/users",
+			`{"username":"","password":"password123"}`,
+			admin.ID, true))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("403 when non-admin tries to create a user", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/users",
+			`{"username":"newuser","password":"password123"}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusForbidden)
+	})
+}
+
+func TestAdminDeleteUser(t *testing.T) {
+	t.Run("admin deletes another user", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/users/%d", alice.ID), "",
+			admin.ID, true))
+		assertStatus(t, w, http.StatusNoContent)
+	})
+
+	t.Run("400 when admin tries to delete themselves", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/users/%d", admin.ID), "",
+			admin.ID, true))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when deleting the last admin", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		alice := ts.mustUser(t, "alice", false)
+		// alice is not admin; admin is the only admin
+		_ = alice
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/users/%d", admin.ID), "",
+			admin.ID, true))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("404 for non-existent user", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		w := ts.do(ts.authReq(t, http.MethodDelete, "/api/users/99999", "",
+			admin.ID, true))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
+// ── Token management ──────────────────────────────────────────────────────────
+
+func TestListTokens(t *testing.T) {
+	ts := newTestServer(t)
+	alice := ts.mustUser(t, "alice", false)
+
+	// Empty list returns [].
+	w := ts.do(ts.authReq(t, http.MethodGet, "/api/auth/tokens", "", alice.ID, false))
+	assertStatus(t, w, http.StatusOK)
+	var tokens []any
+	decodeJSON(t, w, &tokens)
+	if len(tokens) != 0 {
+		t.Errorf("expected empty list, got %d tokens", len(tokens))
+	}
+
+	// After creating a token via DB, it appears in the list.
+	ts.db.CreateToken(alice.ID, "my token", "hash1")
+	w = ts.do(ts.authReq(t, http.MethodGet, "/api/auth/tokens", "", alice.ID, false))
+	assertStatus(t, w, http.StatusOK)
+	decodeJSON(t, w, &tokens)
+	if len(tokens) != 1 {
+		t.Errorf("expected 1 token, got %d", len(tokens))
+	}
+}
+
+func TestCreateToken(t *testing.T) {
+	t.Run("creates token and returns plaintext once", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/auth/tokens",
+			`{"name":"ci-token"}`, alice.ID, false))
+		assertStatus(t, w, http.StatusCreated)
+		var resp map[string]any
+		decodeJSON(t, w, &resp)
+		plaintext, ok := resp["plaintext"].(string)
+		if !ok || !strings.HasPrefix(plaintext, "mt_") {
+			t.Errorf("plaintext: got %q, want mt_... prefix", plaintext)
+		}
+		tok, ok := resp["token"].(map[string]any)
+		if !ok {
+			t.Fatal("expected token object in response")
+		}
+		if tok["name"] != "ci-token" {
+			t.Errorf("token.name: got %q, want ci-token", tok["name"])
+		}
+	})
+
+	t.Run("400 when name exceeds 100 characters", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/auth/tokens",
+			fmt.Sprintf(`{"name":%q}`, strings.Repeat("a", 101)),
+			alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+}
+
+func TestRevokeToken(t *testing.T) {
+	t.Run("revokes own token", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		tok, _ := ts.db.CreateToken(alice.ID, "test", "hash1")
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/auth/tokens/%d", tok.ID), "",
+			alice.ID, false))
+		assertStatus(t, w, http.StatusNoContent)
+	})
+
+	t.Run("404 when revoking another user's token", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		tok, _ := ts.db.CreateToken(alice.ID, "alice-token", "hash2")
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/auth/tokens/%d", tok.ID), "",
+			bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
+// ── GetTask ───────────────────────────────────────────────────────────────────
+
+func TestGetTask(t *testing.T) {
+	t.Run("returns own task", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Pay rent", alice.ID)
+		w := ts.do(ts.authReq(t, http.MethodGet,
+			fmt.Sprintf("/api/tasks/%d", task.ID), "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var got map[string]any
+		decodeJSON(t, w, &got)
+		if got["title"] != "Pay rent" {
+			t.Errorf("title: got %q", got["title"])
+		}
+	})
+
+	t.Run("404 for another user's task", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Alice task", alice.ID)
+		w := ts.do(ts.authReq(t, http.MethodGet,
+			fmt.Sprintf("/api/tasks/%d", task.ID), "", bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+
+	t.Run("404 for non-existent task", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/tasks/99999", "", alice.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
+// ── ListCompletions ───────────────────────────────────────────────────────────
+
+func TestListCompletions(t *testing.T) {
+	t.Run("returns completions for month", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Pay rent", alice.ID)
+		ts.db.AddCompletion(task.ID, "2026-04")
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/completions?month=2026-04",
+			"", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var completions []map[string]any
+		decodeJSON(t, w, &completions)
+		if len(completions) != 1 {
+			t.Errorf("expected 1 completion, got %d", len(completions))
+		}
+	})
+
+	t.Run("400 when month param is missing", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/completions", "", alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("user cannot see another user's completions", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Alice task", alice.ID)
+		ts.db.AddCompletion(task.ID, "2026-04")
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/completions?month=2026-04",
+			"", bob.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var completions []map[string]any
+		decodeJSON(t, w, &completions)
+		if len(completions) != 0 {
+			t.Errorf("bob should see 0 completions, got %d", len(completions))
+		}
+	})
 }
