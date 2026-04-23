@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -78,7 +79,7 @@ var allowedColorModes = map[string]bool{
 // Writes the appropriate error and returns false on failure.
 func (h *Handler) taskOwnerCheck(w http.ResponseWriter, taskID, userID int64) (Task, bool) {
 	task, err := h.db.GetTaskByID(taskID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "task not found", http.StatusNotFound)
 		return Task{}, false
 	}
@@ -230,8 +231,21 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 
 var allowedIntervals = map[int]bool{1: true, 2: true, 3: true, 6: true, 12: true}
 
-func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
-	var req struct {
+// taskBody holds the decoded and validated fields shared by CreateTask and UpdateTask.
+type taskBody struct {
+	Title       string
+	Description string
+	Type        string
+	Metadata    json.RawMessage
+	StartDate   string
+	EndDate     string
+	Interval    int
+}
+
+// parseTaskBody decodes and validates the JSON body for task create/update requests.
+// On failure it writes the appropriate error response and returns false.
+func parseTaskBody(w http.ResponseWriter, r *http.Request) (taskBody, bool) {
+	var raw struct {
 		Title       string          `json:"title"`
 		Description string          `json:"description"`
 		Type        string          `json:"type"`
@@ -240,47 +254,63 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		EndDate     string          `json:"end_date"`
 		Interval    int             `json:"interval"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeError(w, "invalid body", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if req.Title == "" {
+	if raw.Title == "" {
 		writeError(w, "title is required", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if len(req.Title) > 200 {
+	if len(raw.Title) > 200 {
 		writeError(w, "title must be 200 characters or fewer", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if len(req.Description) > 5000 {
+	if len(raw.Description) > 5000 {
 		writeError(w, "description must be 5000 characters or fewer", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if !allowedTaskTypes[req.Type] {
+	if !allowedTaskTypes[raw.Type] {
 		writeError(w, "type must be one of: payment, subscription, bill, reminder, or empty", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if len(req.Metadata) > 4096 {
+	if len(raw.Metadata) > 4096 {
 		writeError(w, "metadata too large", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if len(req.Metadata) > 0 && !json.Valid(req.Metadata) {
+	if len(raw.Metadata) > 0 && !json.Valid(raw.Metadata) {
 		writeError(w, "metadata must be valid JSON", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if req.StartDate != "" && !isValidYearMonth(req.StartDate) {
+	if raw.StartDate != "" && !isValidYearMonth(raw.StartDate) {
 		writeError(w, "start_date must be YYYY-MM format", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if req.EndDate != "" && !isValidYearMonth(req.EndDate) {
+	if raw.EndDate != "" && !isValidYearMonth(raw.EndDate) {
 		writeError(w, "end_date must be YYYY-MM format", http.StatusBadRequest)
-		return
+		return taskBody{}, false
 	}
-	if req.Interval == 0 {
-		req.Interval = 1
+	if raw.Interval == 0 {
+		raw.Interval = 1
 	}
-	if !allowedIntervals[req.Interval] {
+	if !allowedIntervals[raw.Interval] {
 		writeError(w, "interval must be one of: 1, 2, 3, 6, 12", http.StatusBadRequest)
+		return taskBody{}, false
+	}
+	return taskBody{
+		Title:       raw.Title,
+		Description: raw.Description,
+		Type:        raw.Type,
+		Metadata:    raw.Metadata,
+		StartDate:   raw.StartDate,
+		EndDate:     raw.EndDate,
+		Interval:    raw.Interval,
+	}, true
+}
+
+func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
+	req, ok := parseTaskBody(w, r)
+	if !ok {
 		return
 	}
 	task, err := h.db.CreateTask(req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, currentUser(r).UserID, req.Interval)
@@ -300,59 +330,15 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID); !ok {
 		return
 	}
-	var req struct {
-		Title       string          `json:"title"`
-		Description string          `json:"description"`
-		Type        string          `json:"type"`
-		Metadata    json.RawMessage `json:"metadata"`
-		StartDate   string          `json:"start_date"`
-		EndDate     string          `json:"end_date"`
-		Interval    int             `json:"interval"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if req.Title == "" {
-		writeError(w, "title is required", http.StatusBadRequest)
-		return
-	}
-	if len(req.Title) > 200 {
-		writeError(w, "title must be 200 characters or fewer", http.StatusBadRequest)
-		return
-	}
-	if len(req.Description) > 5000 {
-		writeError(w, "description must be 5000 characters or fewer", http.StatusBadRequest)
-		return
-	}
-	if !allowedTaskTypes[req.Type] {
-		writeError(w, "type must be one of: payment, subscription, bill, reminder, or empty", http.StatusBadRequest)
-		return
-	}
-	if len(req.Metadata) > 4096 {
-		writeError(w, "metadata too large", http.StatusBadRequest)
-		return
-	}
-	if len(req.Metadata) > 0 && !json.Valid(req.Metadata) {
-		writeError(w, "metadata must be valid JSON", http.StatusBadRequest)
-		return
-	}
-	if req.StartDate != "" && !isValidYearMonth(req.StartDate) {
-		writeError(w, "start_date must be YYYY-MM format", http.StatusBadRequest)
-		return
-	}
-	if req.EndDate != "" && !isValidYearMonth(req.EndDate) {
-		writeError(w, "end_date must be YYYY-MM format", http.StatusBadRequest)
-		return
-	}
-	if req.Interval == 0 {
-		req.Interval = 1
-	}
-	if !allowedIntervals[req.Interval] {
-		writeError(w, "interval must be one of: 1, 2, 3, 6, 12", http.StatusBadRequest)
+	req, ok := parseTaskBody(w, r)
+	if !ok {
 		return
 	}
 	task, err := h.db.UpdateTask(id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, req.Interval)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, "task not found", http.StatusNotFound)
+		return
+	}
 	if err != nil {
 		writeServerError(w, "failed to update task", err)
 		return
@@ -560,10 +546,17 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 		writeServerError(w, "failed to save file", err)
 		return
 	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
+	// Close dst explicitly — never rely on defer when os.Remove must follow immediately.
+	_, copyErr := io.Copy(dst, file)
+	closeErr := dst.Close()
+	if copyErr != nil {
 		os.Remove(filepath.Join(h.receiptsDir, filename))
-		writeServerError(w, "failed to save file", err)
+		writeServerError(w, "failed to save file", copyErr)
+		return
+	}
+	if closeErr != nil {
+		os.Remove(filepath.Join(h.receiptsDir, filename))
+		writeServerError(w, "failed to flush file", closeErr)
 		return
 	}
 

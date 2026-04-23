@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -419,7 +420,7 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ensure at least one admin remains.
 	target, err := h.db.GetUserByID(id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "user not found", http.StatusNotFound)
 		return
 	}
@@ -502,7 +503,7 @@ func (h *TokenHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if err := h.db.RevokeToken(id, currentUser(r).UserID); err == sql.ErrNoRows {
+	if err := h.db.RevokeToken(id, currentUser(r).UserID); errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "token not found", http.StatusNotFound)
 		return
 	} else if err != nil {
