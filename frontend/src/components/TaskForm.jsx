@@ -17,6 +17,9 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
     value ? parseInt(value.split('-')[0]) : new Date().getFullYear()
   )
   const rootRef = useRef(null)
+  const panelRef = useRef(null)
+  const triggerRef = useRef(null)
+  const prevOpenRef = useRef(false)
 
   // Sync viewYear when value changes from outside
   useEffect(() => {
@@ -40,6 +43,18 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
     }
   }, [open, inline])
 
+  // Focus management: move focus into panel on open, return to trigger on close
+  useEffect(() => {
+    if (inline) return
+    if (open && !prevOpenRef.current) {
+      const firstBtn = panelRef.current?.querySelector('button')
+      firstBtn?.focus()
+    } else if (!open && prevOpenRef.current) {
+      triggerRef.current?.focus()
+    }
+    prevOpenRef.current = open
+  }, [open, inline])
+
   const selYear  = value ? value.split('-')[0] : null
   const selMonth = value ? value.split('-')[1] : null
 
@@ -56,7 +71,13 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
   }
 
   const grid = (
-    <div className="mp-panel" onClick={e => e.stopPropagation()}>
+    <div
+      ref={inline ? undefined : panelRef}
+      className="mp-panel"
+      role={inline ? undefined : 'dialog'}
+      aria-label={inline ? undefined : 'Select month'}
+      onClick={e => e.stopPropagation()}
+    >
       <div className="mp-year-nav">
         <button type="button" className="mp-nav-btn" onClick={() => setViewYear(y => y - 1)} aria-label="Previous year"><span aria-hidden="true">‹</span></button>
         <span className="mp-year-label" aria-live="polite" aria-atomic="true">{viewYear}</span>
@@ -90,6 +111,7 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
   return (
     <div className="mp-root" ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         className={`mp-trigger${value ? '' : ' mp-trigger--empty'}`}
         onClick={() => setOpen(o => !o)}
@@ -135,7 +157,7 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
   useEffect(() => {
     const prev = document.activeElement
     const focusable = modalRef.current?.querySelectorAll(
-      'input, select, button, [tabindex]:not([tabindex="-1"])'
+      'input, select, button, a[href], [tabindex]:not([tabindex="-1"])'
     )
     if (focusable?.length) focusable[0].focus()
     return () => prev?.focus()
@@ -146,7 +168,7 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
     if (e.key !== 'Tab') return
     const focusable = Array.from(
       modalRef.current?.querySelectorAll(
-        'input, select, button, [tabindex]:not([tabindex="-1"])'
+        'input, select, button, a[href], [tabindex]:not([tabindex="-1"])'
       ) ?? []
     )
     if (!focusable.length) return
