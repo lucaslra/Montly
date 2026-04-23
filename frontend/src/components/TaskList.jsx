@@ -62,6 +62,12 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
                   onRemoveReceipt={() => onRemoveReceipt(task.id)}
                 />
               )}
+              {done && (
+                <NoteSlot
+                  note={completion?.note ?? ''}
+                  onSave={note => onUpdateCompletion(task.id, { note })}
+                />
+              )}
               {showConfirm && (
                 <div
                   className="undo-confirm"
@@ -244,6 +250,70 @@ function PaymentSlot({ taskId, taskType, defaultAmount, completion, currency = '
         )
       )}
       <input ref={fileRef} type="file" accept={ACCEPT} style={{ display: 'none' }} onChange={handleFileChange} aria-label="Upload receipt" />
+    </div>
+  )
+}
+
+function NoteSlot({ note, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  function startEdit(e) {
+    e.stopPropagation()
+    setDraft(note)
+    setEditing(true)
+  }
+
+  function save(e) {
+    e?.stopPropagation()
+    onSave(draft.trim())
+    setEditing(false)
+  }
+
+  function cancel(e) {
+    e?.stopPropagation()
+    setEditing(false)
+  }
+
+  function handleKeyDown(e) {
+    e.stopPropagation()
+    if (e.key === 'Escape') cancel(e)
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save(e)
+  }
+
+  if (editing) {
+    return (
+      <div className="note-slot note-slot--editing" onClick={e => e.stopPropagation()}>
+        <textarea
+          className="note-textarea"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Add a note…"
+          maxLength={1000}
+          rows={2}
+          autoFocus
+          aria-label="Completion note"
+        />
+        <span className="note-actions">
+          <button className="amount-confirm-btn" onClick={save} title="Save (Ctrl+Enter)">✓</button>
+          <button className="amount-cancel-btn" onClick={cancel} title="Cancel (Escape)">✕</button>
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="note-slot" onClick={e => e.stopPropagation()}>
+      {note ? (
+        <button className="note-display note-display--filled" onClick={startEdit} title="Edit note">
+          {note}
+        </button>
+      ) : (
+        <button className="note-display note-display--empty" onClick={startEdit}>
+          + add note
+        </button>
+      )}
     </div>
   )
 }

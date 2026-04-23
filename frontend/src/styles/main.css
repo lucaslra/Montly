@@ -746,6 +746,64 @@ body {
 .meta-amount-subscription { color: var(--badge-subscription-text); }
 .meta-amount-bill         { color: var(--badge-bill-text); }
 
+/* ── Note slot ─────────────────────────────────────── */
+.note-slot {
+  margin-top: 4px;
+}
+
+.note-slot--editing {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.note-display {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  text-align: left;
+  padding: 0;
+  line-height: 1.4;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.note-display--empty {
+  color: var(--muted);
+  opacity: 0.65;
+}
+
+.note-display--empty:hover { opacity: 1; }
+
+.note-display--filled {
+  color: var(--text);
+  border-bottom: 1px dashed var(--border);
+}
+
+.note-display--filled:hover { border-bottom-style: solid; }
+
+.note-textarea {
+  flex: 1;
+  resize: vertical;
+  padding: 4px 6px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  min-width: 0;
+  font-family: inherit;
+}
+
+.note-textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.note-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 /* Payment slot — amount + receipt, shown on payment tasks */
 .payment-slot {
   display: flex;
