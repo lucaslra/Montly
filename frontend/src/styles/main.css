@@ -1312,6 +1312,332 @@ body {
 /* ── Small button variant ────────────────────────── */
 .btn-sm { font-size: 0.8125rem; padding: 5px 10px; }
 
+/* ── Report view ─────────────────────────────────── */
+.report-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.report-view > h2 {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+/* Stat cards */
+.report-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-value {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+}
+
+.stat-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* Report sections */
+.report-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.report-section-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.report-section-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.report-empty {
+  font-size: 0.875rem;
+  color: var(--muted);
+  padding: 28px 24px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* ── Spending bar chart ───────────────────────────── */
+.spending-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Canvas: contains gridlines + bars */
+.chart-canvas {
+  position: relative;
+  height: 180px;
+  padding-left: 44px;
+}
+
+/* Horizontal dashed gridlines (absolute, behind bars) */
+.chart-gridline {
+  position: absolute;
+  left: 44px;
+  right: 0;
+  border-top: 1px dashed var(--border);
+  pointer-events: none;
+}
+
+.chart-gridline-label {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: -8px;
+  font-size: 0.5625rem;
+  color: var(--muted);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* Flex row of bar columns */
+.chart-bars {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  gap: 3px;
+}
+
+/* Individual bar column (button) */
+.bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  background: none;
+  border: none;
+  padding: 0 0 2px;
+  cursor: pointer;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Visual track (grows to fill above label) */
+.bar-track {
+  flex: 1;
+  width: 100%;
+  position: relative;
+}
+
+/* Paid bar */
+.bar-fill {
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  border-radius: 3px 3px 0 0;
+  background: var(--primary);
+  min-height: 2px;
+}
+
+/* Forecast bar: muted background, dashed border */
+.bar-fill--forecast {
+  background: var(--border);
+  border: 2px dashed var(--primary);
+  border-bottom: none;
+}
+
+/* Expected amount tick mark */
+.bar-expected-mark {
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  background: var(--muted);
+  opacity: 0.45;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+/* Month label below the bar track */
+.bar-label {
+  font-size: 0.5625rem;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Dot to indicate current month */
+.bar-current-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+}
+
+.bar-col--current .bar-label { color: var(--primary); font-weight: 600; }
+.bar-col--hovered .bar-fill  { opacity: 0.8; }
+.bar-col--hovered .bar-label { color: var(--text); }
+
+/* Tooltip */
+.chart-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 52px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.chart-tooltip--visible { opacity: 1; }
+
+.chart-tooltip strong     { font-size: 0.875rem; }
+.chart-tooltip-muted      { color: var(--muted); }
+.chart-tooltip-hint       { color: var(--muted); font-style: italic; margin: auto 0; }
+
+/* Legend */
+.chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legend-swatch--actual   { background: var(--primary); }
+.legend-swatch--forecast { background: var(--border); border: 1.5px dashed var(--primary); }
+
+.legend-mark--expected {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  background: var(--muted);
+  opacity: 0.45;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+/* ── Category donut chart ─────────────────────────── */
+.category-chart {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.category-legend {
+  list-style: none;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.category-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+
+.category-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.category-legend-label {
+  flex: 1;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-legend-pct {
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  min-width: 30px;
+  text-align: right;
+}
+
+.category-legend-amount {
+  font-weight: 600;
+  color: var(--text);
+  flex-shrink: 0;
+  min-width: 56px;
+  text-align: right;
+}
+
+@media (max-width: 360px) {
+  .category-chart { flex-direction: column; align-items: flex-start; }
+  .report-stats   { grid-template-columns: 1fr; }
+}
+
 /* ── Danger button ───────────────────────────────── */
 .btn-danger {
   background: transparent;

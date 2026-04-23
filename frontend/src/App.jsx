@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import TaskList from './components/TaskList.jsx'
 import ManageView from './components/ManageView.jsx'
 import SettingsView from './components/SettingsView.jsx'
+import ReportView from './components/ReportView.jsx'
 import LoginView from './components/LoginView.jsx'
 import { MonthPicker } from './components/TaskForm.jsx'
 import {
@@ -12,18 +13,26 @@ import {
   fetchMe, logout,
 } from './api.js'
 import './styles/main.css'
+import { formatAmount } from './utils.js'
 
-const DEFAULT_SETTINGS = { currency: '$', date_format: 'long', color_mode: 'system' }
+const DEFAULT_SETTINGS = {
+  currency: '€', date_format: 'long', color_mode: 'system',
+  task_sort: 'type', completed_last: 'false', fiscal_year_start: '1', number_format: 'en',
+}
+
+const TYPE_SORT_ORDER = { payment: 0, subscription: 1, bill: 2, reminder: 3 }
 
 function pathToView(path) {
   if (path === '/manage')   return 'manage'
   if (path === '/settings') return 'settings'
+  if (path === '/report')   return 'report'
   return 'monthly'
 }
 
 function viewToPath(view) {
   if (view === 'manage')   return '/manage'
   if (view === 'settings') return '/settings'
+  if (view === 'report')   return '/report'
   return '/'
 }
 
@@ -299,6 +308,24 @@ export default function App() {
     }
   }, [tasks, completionMap])
 
+  const sortedTasks = useMemo(() => {
+    const sort       = settings.task_sort    ?? 'type'
+    const doneBottom = settings.completed_last === 'true'
+    return [...tasks].sort((a, b) => {
+      if (doneBottom) {
+        const diff = (completionMap.has(a.id) ? 1 : 0) - (completionMap.has(b.id) ? 1 : 0)
+        if (diff !== 0) return diff
+      }
+      if (sort === 'name') return a.title.localeCompare(b.title)
+      if (sort === 'type') {
+        const ra = TYPE_SORT_ORDER[a.type] ?? 4
+        const rb = TYPE_SORT_ORDER[b.type] ?? 4
+        return ra !== rb ? ra - rb : a.title.localeCompare(b.title)
+      }
+      return 0
+    })
+  }, [tasks, completionMap, settings.task_sort, settings.completed_last])
+
   if (!authChecked) return <div className="loading">Loading…</div>
   if (!user) return <LoginView onLogin={u => setUser(u)} />
 
@@ -318,7 +345,7 @@ export default function App() {
             >
               <span aria-hidden="true">{isDark ? '☀' : '☾'}</span>
             </button>
-            {view === 'settings' ? (
+            {view === 'settings' || view === 'report' ? (
               <button className="view-toggle" onClick={() => setView('monthly')}>← Back</button>
             ) : (
               <>
@@ -327,6 +354,14 @@ export default function App() {
                   onClick={() => setView(v => v === 'monthly' ? 'manage' : 'monthly')}
                 >
                   {view === 'monthly' ? 'Manage' : '← Back'}
+                </button>
+                <button
+                  className="settings-btn"
+                  onClick={() => setView('report')}
+                  title="Reports"
+                  aria-label="Reports"
+                >
+                  <span aria-hidden="true">📊</span>
                 </button>
                 <button
                   className="settings-btn"
@@ -395,12 +430,12 @@ export default function App() {
             {hasMonetary && (
               <div className="monetary-summary">
                 {isSettled ? (
-                  <span className="monetary-settled">✓ Settled {settings.currency}{paidAmount.toFixed(2)}</span>
+                  <span className="monetary-settled">✓ Settled {formatAmount(paidAmount, settings.currency, settings.number_format)}</span>
                 ) : (
                   <>
-                    <span>Due {settings.currency}{dueAmount.toFixed(2)}</span>
+                    <span>Due {formatAmount(dueAmount, settings.currency, settings.number_format)}</span>
                     <span className="monetary-divider">·</span>
-                    <span className="monetary-paid">Paid {settings.currency}{paidAmount.toFixed(2)}</span>
+                    <span className="monetary-paid">Paid {formatAmount(paidAmount, settings.currency, settings.number_format)}</span>
                   </>
                 )}
               </div>
@@ -422,7 +457,7 @@ export default function App() {
         ) : view === 'monthly' ? (
           <div style={{ opacity: loading ? 0.5 : 1, transition: 'opacity 0.15s', pointerEvents: loading ? 'none' : 'auto' }}>
             <TaskList
-              tasks={tasks}
+              tasks={sortedTasks}
               completionMap={completionMap}
               currency={settings.currency}
               uploadingTaskId={uploadingTaskId}
@@ -440,6 +475,15 @@ export default function App() {
             onCreate={handleCreate}
             onUpdate={handleUpdate}
             onDelete={handleDelete}
+          />
+        ) : view === 'report' ? (
+          <ReportView
+            month={month}
+            tasks={tasks}
+            completionMap={completionMap}
+            currency={settings.currency}
+            numberFormat={settings.number_format}
+            fiscalYearStart={parseInt(settings.fiscal_year_start ?? '1', 10)}
           />
         ) : (
           <SettingsView settings={settings} onSave={handleSaveSettings} user={user} />
