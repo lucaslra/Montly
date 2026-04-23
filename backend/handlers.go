@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -657,4 +659,60 @@ func (h *Handler) ServeReceipt(w http.ResponseWriter, r *http.Request) {
 	ext := filepath.Ext(filename)
 	w.Header().Set("Content-Disposition", `attachment; filename="receipt`+ext+`"`)
 	http.ServeFile(w, r, filepath.Join(h.receiptsDir, filename))
+}
+
+// ExportCSV streams all completions for the user in the requested month range as a CSV file.
+// Query params:
+//
+//	from  YYYY-MM  first month inclusive (defaults to January of the current year)
+//	to    YYYY-MM  last month inclusive  (defaults to current month)
+func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	defaultFrom := now.Format("2006") + "-01"
+	defaultTo := now.Format("2006-01")
+
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+
+	if from == "" {
+		from = defaultFrom
+	}
+	if to == "" {
+		to = defaultTo
+	}
+	if !isValidYearMonth(from) {
+		writeError(w, "from must be YYYY-MM format", http.StatusBadRequest)
+		return
+	}
+	if !isValidYearMonth(to) {
+		writeError(w, "to must be YYYY-MM format", http.StatusBadRequest)
+		return
+	}
+	if from > to {
+		writeError(w, "from must not be after to", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := h.db.GetCompletionsForExport(currentUser(r).UserID, from, to)
+	if err != nil {
+		writeServerError(w, "failed to export", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="montly-export-`+from+`-`+to+`.csv"`)
+
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"Title", "Type", "Month", "Amount", "Has Receipt"})
+	for _, row := range rows {
+		hasReceipt := "no"
+		if row.HasReceipt {
+			hasReceipt = "yes"
+		}
+		_ = cw.Write([]string{row.Title, row.Type, row.Month, row.Amount, hasReceipt})
+	}
+	cw.Flush()
+	if err := cw.Error(); err != nil {
+		log.Printf("ExportCSV flush: %v", err)
+	}
 }

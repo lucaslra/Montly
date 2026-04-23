@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { fetchTasks, fetchCompletions } from '../api.js'
+import { fetchTasks, fetchCompletions, exportCompletionsCSV } from '../api.js'
 import { formatAmount } from '../utils.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -360,6 +360,77 @@ export default function ReportView({ month, tasks, completionMap, currency, numb
         </div>
         <CategoryChart data={categoryData} currency={currency} numberFormat={numberFormat} />
       </section>
+
+      {/* Export */}
+      <ExportSection currentMonth={month} />
     </div>
+  )
+}
+
+// ── ExportSection ─────────────────────────────────────────────────────────────
+
+function currentYear() {
+  return String(new Date().getFullYear())
+}
+
+function ExportSection({ currentMonth }) {
+  const year = currentYear()
+  const [from, setFrom] = useState(`${year}-01`)
+  const [to,   setTo]   = useState(currentMonth)
+  const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function handleExport(e) {
+    e.preventDefault()
+    setError(null)
+    setDownloading(true)
+    try {
+      const res = await exportCompletionsCSV(from, to)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? `HTTP ${res.status}`)
+      }
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `montly-export-${from}-${to}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err.message ?? 'Export failed')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <section className="report-section report-export">
+      <h3 className="report-section-title">Export</h3>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <form className="export-form" onSubmit={handleExport}>
+        <label htmlFor="export-from" className="export-label">From</label>
+        <input
+          id="export-from"
+          className="export-month-input"
+          type="month"
+          value={from}
+          onChange={e => setFrom(e.target.value)}
+          required
+        />
+        <label htmlFor="export-to" className="export-label">to</label>
+        <input
+          id="export-to"
+          className="export-month-input"
+          type="month"
+          value={to}
+          onChange={e => setTo(e.target.value)}
+          required
+        />
+        <button type="submit" className="btn-secondary btn-sm" disabled={downloading}>
+          {downloading ? 'Downloading…' : 'Download CSV'}
+        </button>
+      </form>
+    </section>
   )
 }
