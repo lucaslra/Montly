@@ -148,11 +148,12 @@ func main() {
 	defer cancel()
 
 	// ── Router ────────────────────────────────────────────────────────────────
-	h := &Handler{db: db, receiptsDir: receiptsDir}
+	h  := &Handler{db: db, receiptsDir: receiptsDir}
 	rl := newRateLimiter(ctx)
 	ah := &AuthHandler{db: db, secret: secret, secure: secureCookies, trustProxy: trustProxy, rl: rl}
 	uh := &UserHandler{db: db}
 	th := &TokenHandler{db: db}
+	wh := &WebhookHandler{db: db}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -182,6 +183,9 @@ func main() {
 			r.Get("/auth/tokens", th.ListTokens)
 			r.Post("/auth/tokens", th.CreateToken)
 			r.Delete("/auth/tokens/{id}", th.RevokeToken)
+			r.Get("/webhooks", wh.ListWebhooks)
+			r.Post("/webhooks", wh.CreateWebhook)
+			r.Delete("/webhooks/{id}", wh.DeleteWebhook)
 			mountAPI(r, h)
 
 			// Admin-only user management

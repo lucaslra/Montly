@@ -84,6 +84,15 @@ type APIToken struct {
 	LastUsedAt string `json:"last_used_at,omitempty"`
 }
 
+type Webhook struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	URL       string `json:"url"`
+	Events    string `json:"events"` // comma-separated: "task.completed,task.uncompleted"
+	Secret    string `json:"-"`      // never serialized
+	CreatedAt string `json:"created_at"`
+}
+
 // ======== Init & Migrations ========
 
 func initDB(dsn, driver string) (*DB, error) {
@@ -162,11 +171,20 @@ func migratePostgres(db *sql.DB) error {
 			created_at   TEXT    NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 			last_used_at TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS webhooks (
+			id         BIGSERIAL PRIMARY KEY,
+			user_id    BIGINT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			url        TEXT    NOT NULL,
+			events     TEXT    NOT NULL DEFAULT '',
+			secret     TEXT    NOT NULL DEFAULT '',
+			created_at TEXT    NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		)`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_id   BIGINT   REFERENCES users(id)`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS interval  INTEGER  NOT NULL DEFAULT 1`,
 		`CREATE INDEX IF NOT EXISTS idx_completions_task_month ON completions(task_id, month)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`,
 	}
 	for _, s := range statements {
 		if _, err := db.Exec(s); err != nil {
@@ -215,6 +233,14 @@ func migrate(db *sql.DB) error {
 			token_hash   TEXT    NOT NULL UNIQUE,
 			created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 			last_used_at TEXT
+		);
+		CREATE TABLE IF NOT EXISTS webhooks (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			url        TEXT    NOT NULL,
+			events     TEXT    NOT NULL DEFAULT '',
+			secret     TEXT    NOT NULL DEFAULT '',
+			created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 		);
 	`); err != nil {
 		return err
@@ -321,6 +347,7 @@ func migrate(db *sql.DB) error {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_completions_task_month ON completions(task_id, month)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`)
 
 	return nil
 }
@@ -963,4 +990,77 @@ func (db *DB) ReceiptBelongsToUser(filename string, userID int64) (bool, error) 
 		filename, userID,
 	).Scan(&n)
 	return n > 0, err
+}
+
+// ======== Webhooks ========
+
+func (db *DB) CreateWebhook(userID int64, url, events, secret string) (Webhook, error) {
+	var id int64
+	if db.driver == "postgres" {
+		err := db.QueryRow(
+			db.q(`INSERT INTO webhooks (user_id, url, events, secret) VALUES (?, ?, ?, ?) RETURNING id`),
+			userID, url, events, secret,
+		).Scan(&id)
+		if err != nil {
+			return Webhook{}, err
+		}
+	} else {
+		res, err := db.Exec(
+			db.q(`INSERT INTO webhooks (user_id, url, events, secret) VALUES (?, ?, ?, ?)`),
+			userID, url, events, secret,
+		)
+		if err != nil {
+			return Webhook{}, err
+		}
+		id, err = res.LastInsertId()
+		if err != nil {
+			return Webhook{}, err
+		}
+	}
+	return db.getWebhookByID(id)
+}
+
+func (db *DB) getWebhookByID(id int64) (Webhook, error) {
+	var wh Webhook
+	err := db.QueryRow(
+		db.q(`SELECT id, user_id, url, events, secret, created_at FROM webhooks WHERE id = ?`), id,
+	).Scan(&wh.ID, &wh.UserID, &wh.URL, &wh.Events, &wh.Secret, &wh.CreatedAt)
+	return wh, err
+}
+
+func (db *DB) ListWebhooks(userID int64) ([]Webhook, error) {
+	rows, err := db.Query(
+		db.q(`SELECT id, user_id, url, events, secret, created_at FROM webhooks WHERE user_id = ? ORDER BY created_at ASC`),
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hooks []Webhook
+	for rows.Next() {
+		var wh Webhook
+		if err := rows.Scan(&wh.ID, &wh.UserID, &wh.URL, &wh.Events, &wh.Secret, &wh.CreatedAt); err != nil {
+			return nil, err
+		}
+		hooks = append(hooks, wh)
+	}
+	return hooks, rows.Err()
+}
+
+func (db *DB) DeleteWebhook(id, userID int64) error {
+	res, err := db.Exec(db.q(`DELETE FROM webhooks WHERE id = ? AND user_id = ?`), id, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// GetWebhooksForUser returns all webhooks for firing — includes secret.
+func (db *DB) GetWebhooksForUser(userID int64) ([]Webhook, error) {
+	return db.ListWebhooks(userID)
 }

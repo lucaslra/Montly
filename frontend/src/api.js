@@ -115,3 +115,13 @@ export const createUser = (username, password, isAdmin) =>
   })
 export const deleteUser = (id) =>
   request(`/users/${id}`, { method: 'DELETE' })
+
+export const fetchWebhooks = () => request('/webhooks')
+export const createWebhook = (url, events, secret) =>
+  request('/webhooks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, events, secret }),
+  })
+export const deleteWebhook = (id) =>
+  request(`/webhooks/${id}`, { method: 'DELETE' })
