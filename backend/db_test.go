@@ -151,8 +151,8 @@ func TestSettingsPerUser(t *testing.T) {
 	if aliceSettings["currency"] != "€" {
 		t.Errorf("alice currency: got %q, want €", aliceSettings["currency"])
 	}
-	if bobSettings["currency"] != "$" {
-		t.Errorf("bob currency: got %q, want $ (default)", bobSettings["currency"])
+	if bobSettings["currency"] != "€" {
+		t.Errorf("bob currency: got %q, want € (default)", bobSettings["currency"])
 	}
 }
 

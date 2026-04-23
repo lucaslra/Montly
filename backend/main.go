@@ -81,25 +81,27 @@ func main() {
 	if n == 0 {
 		adminUser := os.Getenv("ADMIN_USERNAME")
 		adminPass := os.Getenv("ADMIN_PASSWORD")
-		if adminUser == "" || adminPass == "" {
-			log.Fatal("No users exist. Set ADMIN_USERNAME and ADMIN_PASSWORD to create the initial admin account.")
+		if adminUser != "" && adminPass != "" {
+			// Legacy env-var bootstrap — still supported for automated deployments.
+			if len(adminPass) < 8 {
+				log.Fatal("ADMIN_PASSWORD must be at least 8 characters")
+			}
+			hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+			if err != nil {
+				log.Fatalf("hash admin password: %v", err)
+			}
+			admin, err := db.CreateUser(adminUser, string(hash), true)
+			if err != nil {
+				log.Fatalf("create admin user: %v", err)
+			}
+			if err := db.AssignOrphanedTasks(admin.ID); err != nil {
+				log.Fatalf("assign orphaned tasks: %v", err)
+			}
+			settingsMigrationAdminID = admin.ID
+			log.Printf("created admin user %q (id=%d)", adminUser, admin.ID)
+		} else {
+			log.Println("No users found — open the app to register the admin account.")
 		}
-		if len(adminPass) < 8 {
-			log.Fatal("ADMIN_PASSWORD must be at least 8 characters")
-		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
-		if err != nil {
-			log.Fatalf("hash admin password: %v", err)
-		}
-		admin, err := db.CreateUser(adminUser, string(hash), true)
-		if err != nil {
-			log.Fatalf("create admin user: %v", err)
-		}
-		if err := db.AssignOrphanedTasks(admin.ID); err != nil {
-			log.Fatalf("assign orphaned tasks: %v", err)
-		}
-		settingsMigrationAdminID = admin.ID
-		log.Printf("created admin user %q (id=%d)", adminUser, admin.ID)
 	} else {
 		// Find the first admin for the settings schema migration (one-time).
 		if fa, err := db.GetFirstAdmin(); err == nil {
@@ -166,7 +168,9 @@ func main() {
 			})
 		})
 
-		// Public: login / logout
+		// Public: setup check, login, logout
+		r.Get("/auth/setup", ah.SetupStatus)
+		r.Post("/auth/setup", ah.Setup)
 		r.Post("/auth/login", ah.Login)
 		r.Post("/auth/logout", ah.Logout)
 

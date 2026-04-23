@@ -235,6 +235,71 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"id": user.ID, "username": user.Username, "is_admin": user.IsAdmin})
 }
 
+// SetupStatus reports whether first-run setup is still needed (no users exist).
+func (h *AuthHandler) SetupStatus(w http.ResponseWriter, r *http.Request) {
+	n, err := h.db.CountUsers()
+	if err != nil {
+		writeServerError(w, "failed to check setup status", err)
+		return
+	}
+	writeJSON(w, map[string]bool{"needs_setup": n == 0})
+}
+
+// Setup creates the first admin account and opens a session.
+// Returns 409 Conflict if any user already exists.
+func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
+	n, err := h.db.CountUsers()
+	if err != nil {
+		writeServerError(w, "failed to check setup status", err)
+		return
+	}
+	if n > 0 {
+		writeError(w, "already set up", http.StatusConflict)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		writeError(w, "username is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Password) < 8 {
+		writeError(w, "password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		writeServerError(w, "failed to hash password", err)
+		return
+	}
+	admin, err := h.db.CreateUser(req.Username, string(hash), true)
+	if err != nil {
+		writeServerError(w, "failed to create admin user", err)
+		return
+	}
+	// No-op on a fresh install (schema already has user_id), but safe to call.
+	_ = h.db.MigrateSettingsToUserScoped(admin.ID)
+
+	claims := sessionClaims{
+		UserID:  admin.ID,
+		IsAdmin: true,
+		Expires: time.Now().Add(sessionDuration).Unix(),
+	}
+	if err := setSession(w, claims, h.secret, h.secure); err != nil {
+		writeServerError(w, "failed to create session", err)
+		return
+	}
+	writeJSONCreated(w, map[string]any{"id": admin.ID, "username": admin.Username, "is_admin": admin.IsAdmin})
+}
+
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	clearSession(w)
 	w.WriteHeader(http.StatusNoContent)

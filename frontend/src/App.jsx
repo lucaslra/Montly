@@ -4,13 +4,14 @@ import ManageView from './components/ManageView.jsx'
 import SettingsView from './components/SettingsView.jsx'
 import ReportView from './components/ReportView.jsx'
 import LoginView from './components/LoginView.jsx'
+import SetupView from './components/SetupView.jsx'
 import { MonthPicker } from './components/TaskForm.jsx'
 import {
   fetchSettings, updateSettings,
   fetchTasks, fetchCompletions,
   toggleCompletion, createTask, updateTask, deleteTask,
   uploadCompletionReceipt, deleteCompletionReceipt, patchCompletion,
-  fetchMe, logout,
+  fetchMe, logout, fetchSetupStatus,
 } from './api.js'
 import './styles/main.css'
 import { formatAmount } from './utils.js'
@@ -93,12 +94,18 @@ export default function App() {
   // null = unknown (checking), false = not logged in, object = logged-in user
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
+  const [needsSetup, setNeedsSetup] = useState(false)
 
-  // Check existing session on mount.
+  // Check existing session on mount; if not authenticated, check first-run setup.
   useEffect(() => {
     fetchMe()
       .then(u => { setUser(u); setAuthChecked(true) })
-      .catch(() => { setUser(false); setAuthChecked(true) })
+      .catch(() => {
+        fetchSetupStatus()
+          .then(s => setNeedsSetup(s.needs_setup === true))
+          .catch(() => {})
+          .finally(() => { setUser(false); setAuthChecked(true) })
+      })
   }, [])
 
   const onApiError = useCallback((e) => {
@@ -327,6 +334,7 @@ export default function App() {
   }, [tasks, completionMap, settings.task_sort, settings.completed_last])
 
   if (!authChecked) return <div className="loading">Loading…</div>
+  if (!user && needsSetup) return <SetupView onComplete={u => { setNeedsSetup(false); setUser(u) }} />
   if (!user) return <LoginView onLogin={u => setUser(u)} />
 
   const currentMonth = getCurrentMonth()
