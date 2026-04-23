@@ -537,7 +537,7 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if !allowedExtensions[ext] {
-		writeError(w, "unsupported file type (pdf, txt, jpg, png, webp, gif)", http.StatusBadRequest)
+		writeError(w, "unsupported file type (pdf, jpg, png, webp, gif)", http.StatusBadRequest)
 		return
 	}
 
@@ -635,6 +635,7 @@ func (h *Handler) ServeReceipt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Disposition", "attachment")
+	ext := filepath.Ext(filename)
+	w.Header().Set("Content-Disposition", `attachment; filename="receipt`+ext+`"`)
 	http.ServeFile(w, r, filepath.Join(h.receiptsDir, filename))
 }
