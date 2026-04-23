@@ -66,7 +66,7 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
               <div className="manage-item-actions">
                 {/* fix 4: inline delete confirm */}
                 {confirmDelete === task.id ? (
-                  <div className="delete-confirm" role="status" aria-live="polite" aria-atomic="true">
+                  <div className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
                     <span className="delete-confirm-label">Delete?</span>
                     <button
                       className="btn-icon btn-danger"

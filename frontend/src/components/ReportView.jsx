@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { fetchTasks, fetchCompletions } from '../api.js'
 import { formatAmount } from '../utils.js'
 
@@ -96,8 +96,8 @@ function SpendingChart({ data, currency, numberFormat }) {
                   d.isForecast ? 'bar-col--forecast'  : '',
                   isActive     ? 'bar-col--hovered'   : '',
                 ].filter(Boolean).join(' ')}
-                onMouseEnter={() => setHovered(d)}
-                onMouseLeave={() => setHovered(null)}
+                onPointerEnter={() => setHovered(d)}
+                onPointerLeave={() => setHovered(null)}
                 onFocus={() => setHovered(d)}
                 onBlur={() => setHovered(null)}
                 aria-label={
@@ -141,7 +141,7 @@ function SpendingChart({ data, currency, numberFormat }) {
               </>
             )}
           </>
-        ) : <span className="chart-tooltip-hint">Hover a bar for details</span>}
+        ) : <span className="chart-tooltip-hint">Select a bar for details</span>}
       </div>
 
       {/* Legend */}
@@ -219,28 +219,34 @@ export default function ReportView({ month, tasks, completionMap, currency, numb
   const [monthData, setMonthData] = useState([])
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
+  // Session-level cache: avoid re-fetching months already loaded in this session.
+  const cache = useRef(new Map())
 
   useEffect(() => {
     const historyMonths  = Array.from({ length: 6 }, (_, i) => addMonths(month, -(6 - i)))
     const forecastMonths = Array.from({ length: 3 }, (_, i) => addMonths(month, i + 1))
 
+    function fetchHistory(m) {
+      if (cache.current.has(`h:${m}`)) return Promise.resolve(cache.current.get(`h:${m}`))
+      return Promise.all([fetchTasks(m), fetchCompletions(m)]).then(([t, c]) => {
+        const entry = { month: m, tasks: t, cmap: new Map(c.map(x => [x.task_id, x])), isForecast: false }
+        cache.current.set(`h:${m}`, entry)
+        return entry
+      })
+    }
+
+    function fetchForecast(m) {
+      if (cache.current.has(`f:${m}`)) return Promise.resolve(cache.current.get(`f:${m}`))
+      return fetchTasks(m).then(t => {
+        const entry = { month: m, tasks: t, cmap: new Map(), isForecast: true }
+        cache.current.set(`f:${m}`, entry)
+        return entry
+      })
+    }
+
     Promise.all([
-      ...historyMonths.map(m =>
-        Promise.all([fetchTasks(m), fetchCompletions(m)]).then(([t, c]) => ({
-          month: m,
-          tasks: t,
-          cmap:  new Map(c.map(x => [x.task_id, x])),
-          isForecast: false,
-        }))
-      ),
-      ...forecastMonths.map(m =>
-        fetchTasks(m).then(t => ({
-          month: m,
-          tasks: t,
-          cmap:  new Map(),
-          isForecast: true,
-        }))
-      ),
+      ...historyMonths.map(fetchHistory),
+      ...forecastMonths.map(fetchForecast),
     ])
       .then(data => { setMonthData(data); setLoading(false) })
       .catch(e   => { setError(e.message); setLoading(false) })
@@ -303,7 +309,7 @@ export default function ReportView({ month, tasks, completionMap, currency, numb
     }
   }, [chartData, month, fiscalYearStart])
 
-  if (loading) return <div className="loading" aria-busy="true">Loading report…</div>
+  if (loading) return <div className="loading" role="status" aria-live="polite" aria-busy="true">Loading report…</div>
   if (error)   return <div className="error-banner" role="alert">{error}</div>
 
   const hasData = chartData.some(d => d.actual > 0 || d.expected > 0)

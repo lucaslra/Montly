@@ -251,7 +251,7 @@ function PaymentSlot({ taskId, taskType, defaultAmount, completion, currency = '
           </button>
         )
       )}
-      <input ref={fileRef} type="file" accept={ACCEPT} style={{ display: 'none' }} onChange={handleFileChange} />
+      <input ref={fileRef} type="file" accept={ACCEPT} style={{ display: 'none' }} onChange={handleFileChange} aria-label="Upload receipt" />
     </div>
   )
 }
