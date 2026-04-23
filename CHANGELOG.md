@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+- **Reports page** — accessible via the 📊 button in the header
+  - Monthly spending bar chart: 6 months history, current month, 3-month forecast
+  - Expected-amount tick marks and hover tooltip on each bar
+  - Category donut chart: payment / subscription / bill breakdown for the last 3 months
+  - Stat cards: YTD (or fiscal-year-to-date), monthly average, peak month, next-month forecast
+- **First-run UI setup** — on a fresh install with no users, the app shows a registration form instead of a login screen; admin account is created directly in the browser
+  - `GET /api/auth/setup` — public endpoint returning `{"needs_setup": bool}`
+  - `POST /api/auth/setup` — creates first admin and opens a session; returns 409 if already set up
+  - `ADMIN_USERNAME` / `ADMIN_PASSWORD` env-var bootstrap still supported for automated deployments
+- **4 new per-user settings**
+  - Task order: by type (payment → subscription → bill → reminder), alphabetical, or creation order
+  - Completed tasks: mixed in (default) or pushed to the bottom of the list
+  - Fiscal year start month: shifts the YTD stat card label and value in reports
+  - Number format: `1,234.56` (English) or `1.234,56` (European)
+- `frontend/src/utils.js` — shared `formatAmount(amount, currency, numberFormat, decimals)` utility used across monetary displays
+
+### Changed
+- Default currency changed from `$` to `€` for new installs
+- `make up` now always rebuilds the Docker image (`--build` flag)
+- Settings preview now shows a formatted amount reflecting the selected number format
+
 ## [0.2.0] — 2026-04-22
 
 ### Added
