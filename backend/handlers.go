@@ -451,35 +451,56 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, found, err := h.db.GetCompletion(taskID, month)
+	var req struct {
+		Amount *string `json:"amount"`
+		Note   *string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.Amount == nil && req.Note == nil {
+		writeError(w, "amount or note required", http.StatusBadRequest)
+		return
+	}
+
+	existing, found, err := h.db.GetCompletion(taskID, month)
 	if err != nil {
-		writeServerError(w, "failed to check completion", err)
+		writeServerError(w, "failed to get completion", err)
 		return
 	}
 	if !found {
 		writeError(w, "task not marked as done for this month", http.StatusBadRequest)
 		return
 	}
+	completion := existing
 
-	var req struct {
-		Amount string `json:"amount"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if req.Amount != "" {
-		if v, err := strconv.ParseFloat(req.Amount, 64); err != nil || v < 0 {
-			writeError(w, "amount must be a non-negative number", http.StatusBadRequest)
+	if req.Amount != nil {
+		if *req.Amount != "" {
+			if v, parseErr := strconv.ParseFloat(*req.Amount, 64); parseErr != nil || v < 0 {
+				writeError(w, "amount must be a non-negative number", http.StatusBadRequest)
+				return
+			}
+		}
+		completion, err = h.db.SetCompletionAmount(taskID, month, *req.Amount)
+		if err != nil {
+			writeServerError(w, "failed to update completion amount", err)
 			return
 		}
 	}
 
-	completion, err := h.db.SetCompletionAmount(taskID, month, req.Amount)
-	if err != nil {
-		writeServerError(w, "failed to update completion", err)
-		return
+	if req.Note != nil {
+		if len(*req.Note) > 1000 {
+			writeError(w, "note must be 1000 characters or fewer", http.StatusBadRequest)
+			return
+		}
+		completion, err = h.db.SetCompletionNote(taskID, month, *req.Note)
+		if err != nil {
+			writeServerError(w, "failed to update completion note", err)
+			return
+		}
 	}
+
 	writeJSON(w, completion)
 }
 

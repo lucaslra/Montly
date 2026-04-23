@@ -65,6 +65,7 @@ type Completion struct {
 	CompletedAt string `json:"completed_at"`
 	ReceiptFile string `json:"receipt_file"`
 	Amount      string `json:"amount"` // overrides task's default amount when non-empty
+	Note        string `json:"note"`
 }
 
 type User struct {
@@ -143,8 +144,10 @@ func migratePostgres(db *sql.DB) error {
 			completed_at TEXT    NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 			receipt_file TEXT    NOT NULL DEFAULT '',
 			amount       TEXT    NOT NULL DEFAULT '',
+			note         TEXT    NOT NULL DEFAULT '',
 			PRIMARY KEY (task_id, month)
 		)`,
+		`ALTER TABLE completions ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			key     TEXT   NOT NULL,
@@ -196,6 +199,7 @@ func migrate(db *sql.DB) error {
 			completed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 			receipt_file TEXT    NOT NULL DEFAULT '',
 			amount       TEXT    NOT NULL DEFAULT '',
+			note         TEXT    NOT NULL DEFAULT '',
 			PRIMARY KEY (task_id, month)
 		);
 		CREATE TABLE IF NOT EXISTS settings (
@@ -226,6 +230,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE completions ADD COLUMN receipt_file TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE completions ADD COLUMN amount       TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN note         TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			msg := err.Error()
@@ -298,11 +303,12 @@ func migrate(db *sql.DB) error {
 			completed_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 			receipt_file TEXT    NOT NULL DEFAULT '',
 			amount       TEXT    NOT NULL DEFAULT '',
+			note         TEXT    NOT NULL DEFAULT '',
 			PRIMARY KEY (task_id, month)
 		)`); err != nil {
 			return fmt.Errorf("create completions: %w", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO completions SELECT * FROM completions_old`); err != nil {
+		if _, err := tx.Exec(`INSERT INTO completions SELECT task_id, month, completed_at, receipt_file, amount, '' FROM completions_old`); err != nil {
 			return fmt.Errorf("migrate completions data: %w", err)
 		}
 		if _, err := tx.Exec(`DROP TABLE completions_old`); err != nil {
@@ -643,11 +649,11 @@ func (db *DB) DeleteTask(id int64) error {
 
 // ======== Completions ========
 
-const completionColumns = `task_id, month, completed_at, receipt_file, amount`
+const completionColumns = `task_id, month, completed_at, receipt_file, amount, note`
 
 func scanCompletion(row *sql.Row) (Completion, bool, error) {
 	var c Completion
-	err := row.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount)
+	err := row.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount, &c.Note)
 	if err == sql.ErrNoRows {
 		return Completion{}, false, nil
 	}
@@ -657,7 +663,7 @@ func scanCompletion(row *sql.Row) (Completion, bool, error) {
 // GetCompletions returns completions for a given month that belong to the user (via task ownership).
 func (db *DB) GetCompletions(month string, userID int64) ([]Completion, error) {
 	rows, err := db.Query(
-		db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount
+		db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note
 		 FROM completions c
 		 JOIN tasks t ON t.id = c.task_id
 		 WHERE c.month = ? AND t.user_id = ?`),
@@ -670,7 +676,7 @@ func (db *DB) GetCompletions(month string, userID int64) ([]Completion, error) {
 	completions := []Completion{}
 	for rows.Next() {
 		var c Completion
-		if err := rows.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount); err != nil {
+		if err := rows.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount, &c.Note); err != nil {
 			return nil, err
 		}
 		completions = append(completions, c)
@@ -724,6 +730,17 @@ func (db *DB) SetCompletionAmount(taskID int64, month, amount string) (Completio
 	if _, err := db.Exec(
 		db.q(`UPDATE completions SET amount = ? WHERE task_id = ? AND month = ?`),
 		amount, taskID, month,
+	); err != nil {
+		return Completion{}, err
+	}
+	c, _, err := db.GetCompletion(taskID, month)
+	return c, err
+}
+
+func (db *DB) SetCompletionNote(taskID int64, month, note string) (Completion, error) {
+	if _, err := db.Exec(
+		db.q(`UPDATE completions SET note = ? WHERE task_id = ? AND month = ?`),
+		note, taskID, month,
 	); err != nil {
 		return Completion{}, err
 	}
