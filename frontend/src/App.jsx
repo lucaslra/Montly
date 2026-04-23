@@ -193,7 +193,7 @@ export default function App() {
     setCompletionMap(prev => {
       const next = new Map(prev)
       if (wasCompleted) { next.delete(taskId) }
-      else { next.set(taskId, { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '' }) }
+      else { next.set(taskId, { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '', note: '' }) }
       return next
     })
     try {
@@ -202,7 +202,7 @@ export default function App() {
       setCompletionMap(prev => {
         const next = new Map(prev)
         if (completed) {
-          next.set(taskId, prev.get(taskId) ?? { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '' })
+          next.set(taskId, prev.get(taskId) ?? { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '', note: '' })
         } else {
           next.delete(taskId)
         }

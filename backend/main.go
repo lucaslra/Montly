@@ -86,7 +86,7 @@ func main() {
 			if len(adminPass) < 8 {
 				log.Fatal("ADMIN_PASSWORD must be at least 8 characters")
 			}
-			hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+			hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcryptCost)
 			if err != nil {
 				log.Fatalf("hash admin password: %v", err)
 			}
