@@ -397,9 +397,13 @@ func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 // ======== Settings ========
 
 var defaultSettings = map[string]string{
-	"currency":    "$",
-	"date_format": "long",
-	"color_mode":  "system",
+	"currency":          "€",
+	"date_format":       "long",
+	"color_mode":        "system",
+	"task_sort":         "type",
+	"completed_last":    "false",
+	"fiscal_year_start": "1",
+	"number_format":     "en",
 }
 
 func (db *DB) GetSettings(userID int64) (map[string]string, error) {

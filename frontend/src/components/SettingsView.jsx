@@ -4,6 +4,7 @@ import {
   fetchTokens, createToken, revokeToken,
   fetchUsers, createUser, deleteUser,
 } from '../api.js'
+import { formatAmount } from '../utils.js'
 
 // fix 7: grouped by region
 const CURRENCY_GROUPS = [
@@ -40,6 +41,27 @@ const COLOR_MODES = [
   { value: 'system', label: 'System default' },
   { value: 'light',  label: 'Light' },
   { value: 'dark',   label: 'Dark' },
+]
+
+const TASK_SORT_OPTIONS = [
+  { value: 'type',    label: 'By type' },
+  { value: 'name',    label: 'Alphabetical' },
+  { value: 'default', label: 'Creation order' },
+]
+
+const COMPLETED_LAST_OPTIONS = [
+  { value: 'false', label: 'Mixed in (default)' },
+  { value: 'true',  label: 'Completed at bottom' },
+]
+
+const FISCAL_YEAR_MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+].map((label, i) => ({ value: String(i + 1), label }))
+
+const NUMBER_FORMAT_OPTIONS = [
+  { value: 'en', label: '1,234.56' },
+  { value: 'eu', label: '1.234,56' },
 ]
 
 // fix 5: preview formatter (mirrors App.jsx formatMonth)
@@ -328,30 +350,38 @@ function UsersSection({ currentUserId }) {
 // ---------- Main SettingsView ----------
 
 export default function SettingsView({ settings, onSave, user }) {
-  const [currency,   setCurrency]   = useState(settings.currency      ?? '$')
-  const [dateFormat, setDateFormat] = useState(settings.date_format   ?? 'long')
-  const [colorMode,  setColorMode]  = useState(settings.color_mode    ?? 'system')
+  const [currency,        setCurrency]        = useState(settings.currency          ?? '€')
+  const [dateFormat,      setDateFormat]      = useState(settings.date_format       ?? 'long')
+  const [colorMode,       setColorMode]       = useState(settings.color_mode        ?? 'system')
+  const [taskSort,        setTaskSort]        = useState(settings.task_sort         ?? 'type')
+  const [completedLast,   setCompletedLast]   = useState(settings.completed_last    ?? 'false')
+  const [fiscalYearStart, setFiscalYearStart] = useState(settings.fiscal_year_start ?? '1')
+  const [numberFormat,    setNumberFormat]    = useState(settings.number_format     ?? 'en')
   const [saving,  setSaving]  = useState(false)
-  const [savedAt, setSavedAt] = useState(null)   // fix 6: timestamp instead of timed toast
-  const [error,   setError]   = useState(null)   // fix 1: surface errors
+  const [savedAt, setSavedAt] = useState(null)
+  const [error,   setError]   = useState(null)
 
-  // fix 2: keep Appearance in sync when header toggle changes it
-  useEffect(() => {
-    setColorMode(settings.color_mode ?? 'system')
-  }, [settings.color_mode])
+  useEffect(() => { setColorMode(settings.color_mode ?? 'system') }, [settings.color_mode])
 
-  // fix 3: dirty tracking
   const isDirty =
-    currency   !== (settings.currency    ?? '$')     ||
-    dateFormat !== (settings.date_format ?? 'long')  ||
-    colorMode  !== (settings.color_mode  ?? 'system')
+    currency        !== (settings.currency          ?? '€')      ||
+    dateFormat      !== (settings.date_format       ?? 'long')   ||
+    colorMode       !== (settings.color_mode        ?? 'system') ||
+    taskSort        !== (settings.task_sort         ?? 'type')   ||
+    completedLast   !== (settings.completed_last    ?? 'false')  ||
+    fiscalYearStart !== (settings.fiscal_year_start ?? '1')      ||
+    numberFormat    !== (settings.number_format     ?? 'en')
 
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
     setError(null)
     try {
-      await onSave({ currency, date_format: dateFormat, color_mode: colorMode })
+      await onSave({
+        currency, date_format: dateFormat, color_mode: colorMode,
+        task_sort: taskSort, completed_last: completedLast,
+        fiscal_year_start: fiscalYearStart, number_format: numberFormat,
+      })
       setSavedAt(new Date().toLocaleTimeString('default', { hour: '2-digit', minute: '2-digit' }))
     } catch (err) {
       setError(err.message ?? 'Failed to save settings')
@@ -406,13 +436,49 @@ export default function SettingsView({ settings, onSave, user }) {
             </select>
           </div>
 
+          <div className="form-group">
+            <label htmlFor="s-task-sort">Task order</label>
+            <select id="s-task-sort" value={taskSort} onChange={e => setTaskSort(e.target.value)}>
+              {TASK_SORT_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="s-completed-last">Completed tasks</label>
+            <select id="s-completed-last" value={completedLast} onChange={e => setCompletedLast(e.target.value)}>
+              {COMPLETED_LAST_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="s-fiscal-year-start">Fiscal year starts</label>
+            <select id="s-fiscal-year-start" value={fiscalYearStart} onChange={e => setFiscalYearStart(e.target.value)}>
+              {FISCAL_YEAR_MONTHS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="s-number-format">Number format</label>
+            <select id="s-number-format" value={numberFormat} onChange={e => setNumberFormat(e.target.value)}>
+              {NUMBER_FORMAT_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
         </div>
 
-        {/* fix 5: live preview */}
+        {/* live preview */}
         <div className="settings-preview">
           <span className="settings-preview-label">Preview</span>
           <span className="settings-preview-value">
-            {previewMonth(dateFormat)} · {currency}100
+            {previewMonth(dateFormat)} · {formatAmount(1234.56, currency, numberFormat)}
           </span>
         </div>
 
