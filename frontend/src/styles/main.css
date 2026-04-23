@@ -57,6 +57,7 @@ body {
   color: var(--text);
   line-height: 1.5;
   min-height: 100dvh;
+  overscroll-behavior-y: none;
 }
 
 /* ── Layout ──────────────────────────────────────── */
@@ -147,7 +148,8 @@ body {
   justify-content: center;
   transition: border-color 0.15s, color 0.15s;
 }
-.settings-btn:hover { border-color: var(--primary); color: var(--primary); }
+.settings-btn:hover  { border-color: var(--primary); color: var(--primary); }
+.settings-btn.active { border-color: var(--primary); color: var(--primary); background: var(--hover); }
 
 .theme-toggle-btn {
   width: 44px;
@@ -233,8 +235,9 @@ body {
 
 .btn-sm {
   font-size: 0.8125rem;
-  padding: 6px 12px;
+  padding: 5px 10px;
   white-space: nowrap;
+  min-height: 44px;
 }
 
 /* ── Progress ─────────────────────────────────────── */
@@ -500,6 +503,7 @@ body {
   justify-content: center;
   z-index: 100;
   padding: 16px;
+  touch-action: none;
 }
 
 .modal {
@@ -540,7 +544,6 @@ body {
   font-family: inherit;
   background: var(--surface);
   color: var(--text);
-  outline: none;
   transition: border-color 0.15s;
 }
 .form-group input:focus  { border-color: var(--primary); }
@@ -554,7 +557,6 @@ body {
   font-family: inherit;
   background: var(--surface);
   color: var(--text);
-  outline: none;
   cursor: pointer;
   transition: border-color 0.15s;
 }
@@ -586,7 +588,7 @@ body {
   transition: border-color 0.15s;
 }
 .mp-trigger:hover,
-.mp-trigger:focus-visible { border-color: var(--primary); outline: none; }
+.mp-trigger:focus-visible { border-color: var(--primary); }
 .mp-trigger--empty .mp-placeholder { color: var(--muted); }
 
 .mp-panel {
@@ -663,6 +665,7 @@ body {
   width: 100%;
   margin-top: 8px;
   padding: 5px;
+  min-height: 44px;
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -751,7 +754,6 @@ body {
   font-family: inherit;
   background: var(--surface);
   color: var(--text);
-  outline: none;
 }
 
 .amount-confirm-btn,
@@ -830,8 +832,8 @@ body {
   transition: border-color 0.15s, color 0.15s;
 }
 .receipt-remove-btn:hover {
-  border-color: #e53e3e;
-  color: #e53e3e;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* ── Payment type fields ─────────────────────────── */
@@ -864,7 +866,6 @@ body {
   flex: 1;
   border: none !important;
   border-radius: 0 !important;
-  outline: none;
   padding: 9px 12px;
   font-size: 1rem;
   font-family: inherit;
@@ -1007,10 +1008,15 @@ body {
   color: var(--danger);
   cursor: pointer;
   font-size: 0.875rem;
-  padding: 0 2px;
+  padding: 0 8px;
   line-height: 1;
   opacity: 0.7;
   flex-shrink: 0;
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .error-dismiss:hover { opacity: 1; }
 
@@ -1050,7 +1056,9 @@ body {
   font-weight: 500;
   z-index: 300;
   pointer-events: none;
-  white-space: nowrap;
+  max-width: calc(100vw - 32px);
+  white-space: normal;
+  text-align: center;
   box-shadow: 0 4px 16px rgba(0,0,0,0.18);
   animation: toast-in 0.2s ease;
 }
@@ -1107,8 +1115,7 @@ body {
 .form-error {
   font-size: 0.8125rem;
   color: var(--danger);
-  margin-top: -8px;
-  margin-bottom: 6px;
+  margin: 0 0 8px;
 }
 
 /* fix 7: optional field label hint */
@@ -1200,6 +1207,7 @@ body {
 }
 .settings-inline-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
 }
@@ -1216,7 +1224,6 @@ body {
 .form-group-inline label {
   margin: 0;
 }
-.form-error  { font-size: 0.8125rem; color: var(--danger);  margin: 0 0 8px; }
 .form-success { font-size: 0.8125rem; color: var(--success); margin: 0 0 8px; }
 
 /* ── Token reveal box ────────────────────────────── */
@@ -1250,11 +1257,14 @@ body {
 .btn-link {
   background: none;
   border: none;
-  padding: 0;
+  padding: 2px 0;
   font-size: 0.8125rem;
   color: var(--muted);
   cursor: pointer;
   text-decoration: underline;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 .btn-link:hover { color: var(--text); }
 
@@ -1309,8 +1319,7 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* ── Small button variant ────────────────────────── */
-.btn-sm { font-size: 0.8125rem; padding: 5px 10px; }
+/* ── Small button variant defined above ─────────── */
 
 /* ── Report view ─────────────────────────────────── */
 .report-view {

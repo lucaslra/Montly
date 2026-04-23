@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import TaskForm from './TaskForm.jsx'
+import { formatAmount } from '../utils.js'
 
 const INTERVAL_LABELS = { 2: 'Bimestral', 3: 'Trimestral', 6: 'Semestral', 12: 'Annual' }
 function intervalLabel(n) { return INTERVAL_LABELS[n] ?? `Every ${n}m` }
@@ -12,7 +13,7 @@ function fmtMonth(ym) {
     .toLocaleString('default', { month: 'short', year: 'numeric' })
 }
 
-export default function ManageView({ tasks, currency = '$', onCreate, onUpdate, onDelete }) {
+export default function ManageView({ tasks, currency = '$', numberFormat = 'en', onCreate, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(null)
   const [adding, setAdding] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null) // fix 4: task id pending delete
@@ -59,13 +60,13 @@ export default function ManageView({ tasks, currency = '$', onCreate, onUpdate, 
                   {task.end_date   && <span className="end-date-badge">ends {fmtMonth(task.end_date)}</span>}
                 </div>
                 {task.description && <span className="manage-item-desc">{task.description}</span>}
-                <TaskMeta task={task} currency={currency} />
+                <TaskMeta task={task} currency={currency} numberFormat={numberFormat} />
               </div>
 
               <div className="manage-item-actions">
                 {/* fix 4: inline delete confirm */}
                 {confirmDelete === task.id ? (
-                  <div className="delete-confirm" role="status" aria-live="polite" aria-atomic="true">
+                  <div className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
                     <span className="delete-confirm-label">Delete?</span>
                     <button
                       className="btn-icon btn-danger"
@@ -96,6 +97,7 @@ export default function ManageView({ tasks, currency = '$', onCreate, onUpdate, 
         <TaskForm
           task={editing ?? null}
           currency={currency}
+          numberFormat={numberFormat}
           onSave={editing ? handleUpdate : handleCreate}
           onClose={() => { setAdding(false); setEditing(null) }}
         />
@@ -106,13 +108,13 @@ export default function ManageView({ tasks, currency = '$', onCreate, onUpdate, 
 
 const MONETARY_TYPES = ['payment', 'subscription', 'bill']
 
-function TaskMeta({ task, currency = '$' }) {
+function TaskMeta({ task, currency = '$', numberFormat = 'en' }) {
   if (!MONETARY_TYPES.includes(task.type)) return null
   const { amount } = task.metadata ?? {}
   if (!amount) return null
   return (
     <div className="task-meta">
-      <span className={`meta-amount meta-amount-${task.type}`}>{currency}{amount}</span>
+      <span className={`meta-amount meta-amount-${task.type}`}>{formatAmount(parseFloat(amount), currency, numberFormat)}</span>
     </div>
   )
 }

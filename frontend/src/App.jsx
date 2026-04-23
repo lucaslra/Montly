@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import TaskList from './components/TaskList.jsx'
 import ManageView from './components/ManageView.jsx'
 import SettingsView from './components/SettingsView.jsx'
@@ -81,6 +81,8 @@ export default function App() {
   const [month, setMonth] = useState(getCurrentMonth)
   const [tasks, setTasks] = useState([])
   const [completionMap, setCompletionMap] = useState(new Map())
+  const completionMapRef = useRef(completionMap)
+  completionMapRef.current = completionMap
   const [view, setView] = useView()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -184,9 +186,10 @@ export default function App() {
   }, [])
 
   const handleToggle = useCallback(async (taskId) => {
+    // Read current state via ref so this callback stays stable across completion changes.
+    const wasCompleted = completionMapRef.current.has(taskId)
+    const prevEntry    = completionMapRef.current.get(taskId)
     // Optimistic update: flip completion state immediately for snappy UI.
-    const wasCompleted = completionMap.has(taskId)
-    const prevEntry    = completionMap.get(taskId)
     setCompletionMap(prev => {
       const next = new Map(prev)
       if (wasCompleted) { next.delete(taskId) }
@@ -215,7 +218,7 @@ export default function App() {
       })
       onApiError(e)
     }
-  }, [month, completionMap, onApiError])
+  }, [month, onApiError])
 
   const handleUploadReceipt = useCallback(async (taskId, file) => {
     setUploadingTaskId(taskId)
@@ -353,34 +356,32 @@ export default function App() {
             >
               <span aria-hidden="true">{isDark ? '☀' : '☾'}</span>
             </button>
-            {view === 'settings' || view === 'report' ? (
-              <button className="view-toggle" onClick={() => setView('monthly')}>← Back</button>
-            ) : (
-              <>
-                <button
-                  className={`view-toggle${view === 'manage' ? ' active' : ''}`}
-                  onClick={() => setView(v => v === 'monthly' ? 'manage' : 'monthly')}
-                >
-                  {view === 'monthly' ? 'Manage' : '← Back'}
-                </button>
-                <button
-                  className="settings-btn"
-                  onClick={() => setView('report')}
-                  title="Reports"
-                  aria-label="Reports"
-                >
-                  <span aria-hidden="true">📊</span>
-                </button>
-                <button
-                  className="settings-btn"
-                  onClick={() => setView('settings')}
-                  title="Settings"
-                  aria-label="Settings"
-                >
-                  <span aria-hidden="true">⚙</span>
-                </button>
-              </>
-            )}
+            <>
+              <button
+                className={`view-toggle${view === 'manage' ? ' active' : ''}`}
+                onClick={() => setView(v => v === 'monthly' ? 'manage' : 'monthly')}
+              >
+                {view === 'monthly' ? 'Manage' : '← Back'}
+              </button>
+              <button
+                className={`settings-btn${view === 'report' ? ' active' : ''}`}
+                onClick={() => setView(v => v === 'report' ? 'monthly' : 'report')}
+                title="Reports"
+                aria-label="Reports"
+                aria-pressed={view === 'report'}
+              >
+                <span aria-hidden="true">📊</span>
+              </button>
+              <button
+                className={`settings-btn${view === 'settings' ? ' active' : ''}`}
+                onClick={() => setView(v => v === 'settings' ? 'monthly' : 'settings')}
+                title="Settings"
+                aria-label="Settings"
+                aria-pressed={view === 'settings'}
+              >
+                <span aria-hidden="true">⚙</span>
+              </button>
+            </>
             <button
               className="logout-btn"
               onClick={handleLogout}
@@ -480,6 +481,7 @@ export default function App() {
           <ManageView
             tasks={tasks}
             currency={settings.currency}
+            numberFormat={settings.number_format}
             onCreate={handleCreate}
             onUpdate={handleUpdate}
             onDelete={handleDelete}
