@@ -141,7 +141,7 @@ function SpendingChart({ data, currency, numberFormat }) {
               </>
             )}
           </>
-        ) : <span className="chart-tooltip-hint">Hover a bar for details</span>}
+        ) : <span className="chart-tooltip-hint">Select a bar for details</span>}
       </div>
 
       {/* Legend */}
@@ -309,7 +309,7 @@ export default function ReportView({ month, tasks, completionMap, currency, numb
     }
   }, [chartData, month, fiscalYearStart])
 
-  if (loading) return <div className="loading" aria-busy="true">Loading report…</div>
+  if (loading) return <div className="loading" role="status" aria-live="polite" aria-busy="true">Loading report…</div>
   if (error)   return <div className="error-banner" role="alert">{error}</div>
 
   const hasData = chartData.some(d => d.actual > 0 || d.expected > 0)

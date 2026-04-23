@@ -72,6 +72,7 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
               type="button"
               className={`mp-month${selected ? ' mp-month--selected' : ''}`}
               onClick={() => select(idx)}
+              aria-pressed={selected}
             >
               {label}
             </button>
@@ -94,7 +95,7 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
         onClick={() => setOpen(o => !o)}
         aria-label={label ? `${label}: ${formatValue(value) ?? 'not set'}` : undefined}
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
       >
         {formatValue(value) ?? <span className="mp-placeholder">Select month</span>}
       </button>
@@ -262,7 +263,7 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
             <label>End date <span className="label-optional">(optional)</span></label>
             <MonthPicker value={endDate} onChange={v => { setEndDate(v); setDateError('') }} label="End date" />
           </div>
-          {dateError && <p className="form-error">{dateError}</p>}
+          {dateError && <p className="form-error" role="alert">{dateError}</p>}
 
           <div className="form-group">
             <label htmlFor="task-interval">Recurrence</label>
