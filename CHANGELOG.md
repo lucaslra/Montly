@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.2] — 2026-04-23
+
+### Added
+- `SECURITY.md` — vulnerability disclosure process and security design notes
+- `CONTRIBUTING.md` — setup instructions, code conventions, and PR guidelines
+- `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1
+- README badges: Go version, React version, Docker, self-hosted, MIT license
+- README preview screenshots: desktop task list, reports view, mobile layout
+
 ## [0.3.1] — 2026-04-23
 
 ### Added
