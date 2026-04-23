@@ -125,3 +125,10 @@ export const createWebhook = (url, events, secret) =>
   })
 export const deleteWebhook = (id) =>
   request(`/webhooks/${id}`, { method: 'DELETE' })
+
+export function exportCompletionsCSV(from, to) {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to)   params.set('to', to)
+  return fetch(`${BASE}/export/completions.csv?${params}`)
+}

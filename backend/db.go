@@ -773,6 +773,42 @@ func (db *DB) SetCompletionNote(taskID int64, month, note string) (Completion, e
 	return c, err
 }
 
+// ExportRow is a flat row used for CSV export.
+type ExportRow struct {
+	Title      string
+	Type       string
+	Month      string
+	Amount     string
+	HasReceipt bool
+}
+
+// GetCompletionsForExport returns all completions in the [from, to] month range for the user.
+func (db *DB) GetCompletionsForExport(userID int64, from, to string) ([]ExportRow, error) {
+	rows, err := db.Query(
+		db.q(`SELECT t.title, t.type, c.month, c.amount, c.receipt_file
+		 FROM completions c
+		 JOIN tasks t ON t.id = c.task_id
+		 WHERE t.user_id = ? AND c.month >= ? AND c.month <= ?
+		 ORDER BY c.month ASC, t.title ASC`),
+		userID, from, to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ExportRow
+	for rows.Next() {
+		var row ExportRow
+		var receiptFile string
+		if err := rows.Scan(&row.Title, &row.Type, &row.Month, &row.Amount, &receiptFile); err != nil {
+			return nil, err
+		}
+		row.HasReceipt = receiptFile != ""
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
 // ======== Users ========
 
 const userColumns = `id, username, password_hash, is_admin, created_at`

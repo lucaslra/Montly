@@ -1552,6 +1552,29 @@ body {
   border-radius: var(--radius);
 }
 
+.export-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.export-label {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.export-month-input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.export-month-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
 /* ── Spending bar chart ───────────────────────────── */
 .spending-chart {
   display: flex;

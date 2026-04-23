@@ -229,6 +229,7 @@ func mountAPI(r chi.Router, h *Handler) {
 	r.Patch("/completions/{task_id}/{month}", h.PatchCompletion)
 	r.Post("/completions/{task_id}/{month}/receipt", h.UploadCompletionReceipt)
 	r.Delete("/completions/{task_id}/{month}/receipt", h.DeleteCompletionReceipt)
+	r.Get("/export/completions.csv", h.ExportCSV)
 }
 
 func spaHandler(fsys fs.FS) http.Handler {
