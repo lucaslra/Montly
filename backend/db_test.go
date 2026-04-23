@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -245,5 +246,485 @@ func TestUpdateUserPassword(t *testing.T) {
 	updated, _ := db.GetUserByID(user.ID)
 	if err := bcrypt.CompareHashAndPassword([]byte(updated.PasswordHash), []byte("newpassword99")); err != nil {
 		t.Error("updated password hash does not match new password")
+	}
+}
+
+// ── Phase 2: DB gap-fill ──────────────────────────────────────────────────────
+
+// ── CountUsers / CountAdmins / GetFirstAdmin ──────────────────────────────────
+
+func TestCountUsers(t *testing.T) {
+	db := setupTestDB(t)
+
+	n, err := db.CountUsers()
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("empty DB: got %d, want 0", n)
+	}
+
+	db.CreateUser("alice", testHash(t), false)
+	db.CreateUser("bob", testHash(t), false)
+
+	n, err = db.CountUsers()
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("after 2 inserts: got %d, want 2", n)
+	}
+}
+
+func TestCountAdmins(t *testing.T) {
+	db := setupTestDB(t)
+
+	db.CreateUser("alice", testHash(t), false)
+	db.CreateUser("admin1", testHash(t), true)
+	db.CreateUser("admin2", testHash(t), true)
+
+	n, err := db.CountAdmins()
+	if err != nil {
+		t.Fatalf("count admins: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("got %d admins, want 2", n)
+	}
+}
+
+func TestGetFirstAdmin(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create a non-admin first, then two admins — expect the first admin by ID.
+	db.CreateUser("regular", testHash(t), false)
+	admin1, _ := db.CreateUser("admin1", testHash(t), true)
+	db.CreateUser("admin2", testHash(t), true)
+
+	got, err := db.GetFirstAdmin()
+	if err != nil {
+		t.Fatalf("GetFirstAdmin: %v", err)
+	}
+	if got.ID != admin1.ID {
+		t.Errorf("got admin id %d, want %d", got.ID, admin1.ID)
+	}
+	if got.Username != "admin1" {
+		t.Errorf("got username %q, want admin1", got.Username)
+	}
+}
+
+// ── Task CRUD ─────────────────────────────────────────────────────────────────
+
+func TestTaskCRUD(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+
+	// Create
+	task, err := db.CreateTask("Pay rent", "monthly rent", "payment", "2026-01", "2026-12", nil, user.ID, 1)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if task.Title != "Pay rent" {
+		t.Errorf("title: got %q, want 'Pay rent'", task.Title)
+	}
+	if task.Type != "payment" {
+		t.Errorf("type: got %q, want payment", task.Type)
+	}
+	if task.StartDate != "2026-01" {
+		t.Errorf("start_date: got %q, want 2026-01", task.StartDate)
+	}
+	if task.EndDate != "2026-12" {
+		t.Errorf("end_date: got %q, want 2026-12", task.EndDate)
+	}
+	if task.Interval != 1 {
+		t.Errorf("interval: got %d, want 1", task.Interval)
+	}
+	if task.UserID != user.ID {
+		t.Errorf("user_id: got %d, want %d", task.UserID, user.ID)
+	}
+
+	// Update
+	updated, err := db.UpdateTask(task.ID, "New title", "new desc", "bill", "2026-02", "2026-11", nil, 3)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Title != "New title" {
+		t.Errorf("updated title: got %q, want 'New title'", updated.Title)
+	}
+	if updated.Type != "bill" {
+		t.Errorf("updated type: got %q, want bill", updated.Type)
+	}
+	if updated.Interval != 3 {
+		t.Errorf("updated interval: got %d, want 3", updated.Interval)
+	}
+
+	// GetTaskByID round-trip
+	fetched, err := db.GetTaskByID(task.ID)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+	if fetched.Title != "New title" {
+		t.Errorf("fetched title: got %q", fetched.Title)
+	}
+
+	// Delete
+	if err := db.DeleteTask(task.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	_, err = db.GetTaskByID(task.ID)
+	if err == nil {
+		t.Error("expected error after delete, got nil")
+	}
+}
+
+func TestGetTasks_StartDateFilter(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+
+	// Task with start_date "2026-03" should not appear in earlier months.
+	db.CreateTask("March task", "", "", "2026-03", "", nil, user.ID, 1)
+
+	before, _ := db.GetTasks("2026-02", user.ID)
+	if len(before) != 0 {
+		t.Errorf("2026-02: expected 0 tasks (before start), got %d", len(before))
+	}
+
+	onStart, _ := db.GetTasks("2026-03", user.ID)
+	if len(onStart) != 1 {
+		t.Errorf("2026-03: expected 1 task (on start), got %d", len(onStart))
+	}
+
+	after, _ := db.GetTasks("2026-04", user.ID)
+	if len(after) != 1 {
+		t.Errorf("2026-04: expected 1 task (after start), got %d", len(after))
+	}
+}
+
+func TestGetTasks_EndDateFilter(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+
+	db.CreateTask("Expiring task", "", "", "2026-01", "2026-02", nil, user.ID, 1)
+
+	within, _ := db.GetTasks("2026-02", user.ID)
+	if len(within) != 1 {
+		t.Errorf("2026-02: expected 1 task (within range), got %d", len(within))
+	}
+
+	after, _ := db.GetTasks("2026-03", user.ID)
+	if len(after) != 0 {
+		t.Errorf("2026-03: expected 0 tasks (after end), got %d", len(after))
+	}
+}
+
+func TestGetTasks_IntervalFilter(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+
+	// Quarterly task (interval=3) anchored at 2026-01.
+	db.CreateTask("Quarterly", "", "", "2026-01", "", nil, user.ID, 3)
+
+	cases := []struct {
+		month string
+		want  int
+	}{
+		{"2026-01", 1}, // anchor month — appears
+		{"2026-02", 0}, // 1 month offset — skip
+		{"2026-03", 0}, // 2 months offset — skip
+		{"2026-04", 1}, // 3 months offset — appears
+		{"2026-07", 1}, // 6 months offset — appears
+	}
+	for _, tc := range cases {
+		tasks, err := db.GetTasks(tc.month, user.ID)
+		if err != nil {
+			t.Fatalf("GetTasks(%s): %v", tc.month, err)
+		}
+		if len(tasks) != tc.want {
+			t.Errorf("month=%s: got %d tasks, want %d", tc.month, len(tasks), tc.want)
+		}
+	}
+}
+
+// ── Completion CRUD ───────────────────────────────────────────────────────────
+
+func TestCompletionCRUD(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+	task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, user.ID, 1)
+
+	// AddCompletion
+	c, err := db.AddCompletion(task.ID, "2026-04")
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if c.TaskID != task.ID {
+		t.Errorf("task_id: got %d, want %d", c.TaskID, task.ID)
+	}
+	if c.Month != "2026-04" {
+		t.Errorf("month: got %q, want 2026-04", c.Month)
+	}
+	if c.Amount != "" {
+		t.Errorf("amount: want empty, got %q", c.Amount)
+	}
+
+	// GetCompletion
+	got, found, err := db.GetCompletion(task.ID, "2026-04")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !found {
+		t.Fatal("GetCompletion: expected found=true")
+	}
+	if got.TaskID != task.ID {
+		t.Errorf("get: task_id mismatch")
+	}
+
+	// SetCompletionAmount
+	c, err = db.SetCompletionAmount(task.ID, "2026-04", "42.50")
+	if err != nil {
+		t.Fatalf("set amount: %v", err)
+	}
+	if c.Amount != "42.50" {
+		t.Errorf("amount: got %q, want 42.50", c.Amount)
+	}
+
+	// SetCompletionNote
+	c, err = db.SetCompletionNote(task.ID, "2026-04", "paid via bank transfer")
+	if err != nil {
+		t.Fatalf("set note: %v", err)
+	}
+	if c.Note != "paid via bank transfer" {
+		t.Errorf("note: got %q", c.Note)
+	}
+
+	// SetCompletionReceipt
+	c, err = db.SetCompletionReceipt(task.ID, "2026-04", "550e8400-e29b-41d4-a716-446655440000.pdf")
+	if err != nil {
+		t.Fatalf("set receipt: %v", err)
+	}
+	if c.ReceiptFile != "550e8400-e29b-41d4-a716-446655440000.pdf" {
+		t.Errorf("receipt_file: got %q", c.ReceiptFile)
+	}
+
+	// ClearCompletionReceipt
+	c, err = db.ClearCompletionReceipt(task.ID, "2026-04")
+	if err != nil {
+		t.Fatalf("clear receipt: %v", err)
+	}
+	if c.ReceiptFile != "" {
+		t.Errorf("receipt_file after clear: got %q, want empty", c.ReceiptFile)
+	}
+
+	// RemoveCompletion
+	if err := db.RemoveCompletion(task.ID, "2026-04"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	_, found, err = db.GetCompletion(task.ID, "2026-04")
+	if err != nil {
+		t.Fatalf("get after remove: %v", err)
+	}
+	if found {
+		t.Error("expected found=false after remove")
+	}
+}
+
+func TestGetCompletion_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+	_, found, err := db.GetCompletion(task.ID, "2026-04")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Error("expected found=false for non-existent completion")
+	}
+}
+
+// ── GetReceiptsForTask ────────────────────────────────────────────────────────
+
+func TestGetReceiptsForTask(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+	db.AddCompletion(task.ID, "2026-01")
+	db.AddCompletion(task.ID, "2026-02")
+	db.SetCompletionReceipt(task.ID, "2026-01", "550e8400-e29b-41d4-a716-446655440000.pdf")
+	// 2026-02 has no receipt
+
+	files, err := db.GetReceiptsForTask(task.ID)
+	if err != nil {
+		t.Fatalf("GetReceiptsForTask: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if files[0] != "550e8400-e29b-41d4-a716-446655440000.pdf" {
+		t.Errorf("filename: got %q", files[0])
+	}
+}
+
+// ── GetCompletionsForExport ───────────────────────────────────────────────────
+
+func TestGetCompletionsForExport(t *testing.T) {
+	db := setupTestDB(t)
+	alice, _ := db.CreateUser("alice", testHash(t), false)
+	bob, _ := db.CreateUser("bob", testHash(t), false)
+
+	taskA, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, alice.ID, 1)
+	taskB, _ := db.CreateTask("Internet", "", "subscription", "2020-01", "", nil, alice.ID, 1)
+	taskBob, _ := db.CreateTask("Bob task", "", "", "2020-01", "", nil, bob.ID, 1)
+
+	db.AddCompletion(taskA.ID, "2026-01")
+	db.AddCompletion(taskA.ID, "2026-03")
+	db.AddCompletion(taskB.ID, "2026-02")
+	db.AddCompletion(taskBob.ID, "2026-02") // should not appear in alice's export
+
+	t.Run("returns rows within range", func(t *testing.T) {
+		rows, err := db.GetCompletionsForExport(alice.ID, "2026-01", "2026-02")
+		if err != nil {
+			t.Fatalf("export: %v", err)
+		}
+		if len(rows) != 2 {
+			t.Errorf("got %d rows, want 2 (2026-01 and 2026-02 completions)", len(rows))
+		}
+	})
+
+	t.Run("excludes completions outside range", func(t *testing.T) {
+		rows, err := db.GetCompletionsForExport(alice.ID, "2026-01", "2026-02")
+		if err != nil {
+			t.Fatalf("export: %v", err)
+		}
+		for _, r := range rows {
+			if r.Month > "2026-02" || r.Month < "2026-01" {
+				t.Errorf("row %q is outside range 2026-01..2026-02", r.Month)
+			}
+		}
+	})
+
+	t.Run("does not include other users' completions", func(t *testing.T) {
+		rows, err := db.GetCompletionsForExport(alice.ID, "2026-01", "2026-12")
+		if err != nil {
+			t.Fatalf("export: %v", err)
+		}
+		for _, r := range rows {
+			if r.Title == "Bob task" {
+				t.Error("alice's export should not include bob's task")
+			}
+		}
+	})
+
+	t.Run("HasReceipt flag is set when receipt exists", func(t *testing.T) {
+		db.SetCompletionReceipt(taskA.ID, "2026-01", "550e8400-e29b-41d4-a716-446655440000.pdf")
+		rows, err := db.GetCompletionsForExport(alice.ID, "2026-01", "2026-01")
+		if err != nil {
+			t.Fatalf("export: %v", err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("expected 1 row, got %d", len(rows))
+		}
+		if !rows[0].HasReceipt {
+			t.Error("expected HasReceipt=true for completion with receipt")
+		}
+	})
+}
+
+// ── ReceiptBelongsToUser ──────────────────────────────────────────────────────
+
+func TestReceiptBelongsToUser(t *testing.T) {
+	db := setupTestDB(t)
+	alice, _ := db.CreateUser("alice", testHash(t), false)
+	bob, _ := db.CreateUser("bob", testHash(t), false)
+
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, alice.ID, 1)
+	db.AddCompletion(task.ID, "2026-04")
+	receipt := "550e8400-e29b-41d4-a716-446655440000.pdf"
+	db.SetCompletionReceipt(task.ID, "2026-04", receipt)
+
+	ok, err := db.ReceiptBelongsToUser(receipt, alice.ID)
+	if err != nil {
+		t.Fatalf("check alice: %v", err)
+	}
+	if !ok {
+		t.Error("expected receipt to belong to alice")
+	}
+
+	ok, err = db.ReceiptBelongsToUser(receipt, bob.ID)
+	if err != nil {
+		t.Fatalf("check bob: %v", err)
+	}
+	if ok {
+		t.Error("expected receipt to NOT belong to bob")
+	}
+}
+
+// ── Webhook CRUD ──────────────────────────────────────────────────────────────
+
+func TestWebhookCRUD(t *testing.T) {
+	db := setupTestDB(t)
+	alice, _ := db.CreateUser("alice", testHash(t), false)
+	bob, _ := db.CreateUser("bob", testHash(t), false)
+
+	// Create
+	wh, err := db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "mysecret")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if wh.URL != "https://example.com/hook" {
+		t.Errorf("url: got %q", wh.URL)
+	}
+	if wh.Events != "task.completed" {
+		t.Errorf("events: got %q, want task.completed", wh.Events)
+	}
+	if wh.Secret != "mysecret" {
+		t.Errorf("secret: got %q, want mysecret", wh.Secret)
+	}
+	if wh.UserID != alice.ID {
+		t.Errorf("user_id: got %d, want %d", wh.UserID, alice.ID)
+	}
+
+	// ListWebhooks
+	hooks, err := db.ListWebhooks(alice.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(hooks) != 1 {
+		t.Fatalf("list: got %d hooks, want 1", len(hooks))
+	}
+	if hooks[0].ID != wh.ID {
+		t.Errorf("list: id mismatch")
+	}
+
+	// GetWebhooksForUser returns same as list (includes secret for firing)
+	firing, err := db.GetWebhooksForUser(alice.ID)
+	if err != nil {
+		t.Fatalf("GetWebhooksForUser: %v", err)
+	}
+	if len(firing) != 1 || firing[0].Secret != "mysecret" {
+		t.Error("GetWebhooksForUser: missing secret field")
+	}
+
+	// Bob sees no hooks
+	bobHooks, err := db.ListWebhooks(bob.ID)
+	if err != nil {
+		t.Fatalf("list bob: %v", err)
+	}
+	if len(bobHooks) != 0 {
+		t.Errorf("bob should see 0 hooks, got %d", len(bobHooks))
+	}
+
+	// Delete with wrong user → ErrNoRows
+	if err := db.DeleteWebhook(wh.ID, bob.ID); err != sql.ErrNoRows {
+		t.Errorf("wrong-owner delete: got %v, want sql.ErrNoRows", err)
+	}
+
+	// Delete with correct user → success
+	if err := db.DeleteWebhook(wh.ID, alice.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	hooks, _ = db.ListWebhooks(alice.ID)
+	if len(hooks) != 0 {
+		t.Errorf("after delete: expected 0 hooks, got %d", len(hooks))
 	}
 }
