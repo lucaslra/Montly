@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1347,5 +1350,356 @@ func TestListCompletions(t *testing.T) {
 		if len(completions) != 0 {
 			t.Errorf("bob should see 0 completions, got %d", len(completions))
 		}
+	})
+}
+
+// ── Phase 4: webhook HTTP handlers and FireWebhooks delivery ─────────────────
+
+// ── Webhook HTTP handlers ─────────────────────────────────────────────────────
+
+func TestWebhooksHTTP_List(t *testing.T) {
+	t.Run("returns empty array (not null) when no webhooks", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/webhooks", "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		// Must decode as array, not null.
+		var hooks []map[string]any
+		decodeJSON(t, w, &hooks)
+		if hooks == nil {
+			t.Error("expected empty array [], got null")
+		}
+		if len(hooks) != 0 {
+			t.Errorf("expected 0 hooks, got %d", len(hooks))
+		}
+	})
+
+	t.Run("returns created webhook without secret field", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "s3cr3t")
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/webhooks", "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var hooks []map[string]any
+		decodeJSON(t, w, &hooks)
+		if len(hooks) != 1 {
+			t.Fatalf("expected 1 hook, got %d", len(hooks))
+		}
+		if hooks[0]["url"] != "https://example.com/hook" {
+			t.Errorf("url: got %q", hooks[0]["url"])
+		}
+		if _, hasSecret := hooks[0]["secret"]; hasSecret {
+			t.Error("secret must not be returned in list response")
+		}
+	})
+
+	t.Run("user cannot see another user's webhooks", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "")
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/webhooks", "", bob.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var hooks []map[string]any
+		decodeJSON(t, w, &hooks)
+		if len(hooks) != 0 {
+			t.Errorf("bob should see 0 webhooks, got %d", len(hooks))
+		}
+	})
+}
+
+func TestWebhooksHTTP_Create(t *testing.T) {
+	t.Run("creates webhook with valid URL and events", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/webhooks",
+			`{"url":"https://example.com/hook","events":["task.completed"],"secret":"mysecret"}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusCreated)
+		var hook map[string]any
+		decodeJSON(t, w, &hook)
+		if hook["url"] != "https://example.com/hook" {
+			t.Errorf("url: got %q", hook["url"])
+		}
+		if hook["events"] != "task.completed" {
+			t.Errorf("events: got %q, want task.completed", hook["events"])
+		}
+		// Secret must not appear in the create response.
+		if _, hasSecret := hook["secret"]; hasSecret {
+			t.Error("secret must not be returned in create response")
+		}
+	})
+
+	t.Run("accepts both event types", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/webhooks",
+			`{"url":"https://example.com/h","events":["task.completed","task.uncompleted"]}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusCreated)
+	})
+
+	t.Run("400 when URL scheme is not http/https", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/webhooks",
+			`{"url":"ftp://example.com/hook","events":["task.completed"]}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when URL is empty", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/webhooks",
+			`{"url":"","events":["task.completed"]}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when no events provided", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/webhooks",
+			`{"url":"https://example.com/hook","events":[]}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 on unknown event name", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/webhooks",
+			`{"url":"https://example.com/hook","events":["task.deleted"]}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when secret exceeds 200 characters", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/webhooks",
+			fmt.Sprintf(`{"url":"https://example.com/hook","events":["task.completed"],"secret":%q}`,
+				strings.Repeat("s", 201)),
+			alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+}
+
+func TestWebhooksHTTP_Delete(t *testing.T) {
+	t.Run("deletes own webhook", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		wh, _ := ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "")
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/webhooks/%d", wh.ID), "",
+			alice.ID, false))
+		assertStatus(t, w, http.StatusNoContent)
+	})
+
+	t.Run("404 when deleting another user's webhook", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		wh, _ := ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "")
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/webhooks/%d", wh.ID), "",
+			bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
+// ── FireWebhooks ──────────────────────────────────────────────────────────────
+
+// webhookCapture is a test HTTP server that captures incoming deliveries.
+type webhookCapture struct {
+	hits chan webhookHit
+	srv  *httptest.Server
+}
+
+type webhookHit struct {
+	body    []byte
+	headers http.Header
+}
+
+func newWebhookCapture() *webhookCapture {
+	c := &webhookCapture{hits: make(chan webhookHit, 10)}
+	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		c.hits <- webhookHit{body: body, headers: r.Header.Clone()}
+		w.WriteHeader(http.StatusOK)
+	}))
+	return c
+}
+
+func (c *webhookCapture) close() { c.srv.Close() }
+
+// waitHit waits up to 2 seconds for a delivery and returns it, or fails the test.
+func (c *webhookCapture) waitHit(t *testing.T) webhookHit {
+	t.Helper()
+	select {
+	case hit := <-c.hits:
+		return hit
+	case <-time.After(2 * time.Second):
+		t.Fatal("webhook delivery not received within 2s")
+		return webhookHit{}
+	}
+}
+
+// expectNoHit asserts no delivery arrives within 200 ms.
+func (c *webhookCapture) expectNoHit(t *testing.T) {
+	t.Helper()
+	select {
+	case <-c.hits:
+		t.Error("unexpected webhook delivery received")
+	case <-time.After(200 * time.Millisecond):
+		// good — nothing arrived
+	}
+}
+
+func TestFireWebhooks_Delivery(t *testing.T) {
+	t.Run("delivers payload with correct fields", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "")
+
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+
+		hit := cap.waitHit(t)
+
+		var payload webhookPayload
+		if err := json.Unmarshal(hit.body, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload.Event != "task.completed" {
+			t.Errorf("event: got %q, want task.completed", payload.Event)
+		}
+		if payload.TaskID != task.ID {
+			t.Errorf("task_id: got %d, want %d", payload.TaskID, task.ID)
+		}
+		if payload.TaskTitle != "Pay rent" {
+			t.Errorf("task_title: got %q, want 'Pay rent'", payload.TaskTitle)
+		}
+		if payload.Month != "2026-04" {
+			t.Errorf("month: got %q, want 2026-04", payload.Month)
+		}
+		if payload.Timestamp == "" {
+			t.Error("timestamp should not be empty")
+		}
+	})
+
+	t.Run("sets correct Content-Type header", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "")
+
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+
+		hit := cap.waitHit(t)
+		if ct := hit.headers.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type: got %q, want application/json", ct)
+		}
+	})
+
+	t.Run("includes HMAC signature when secret is set", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+		secret := "webhook-secret-123"
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", secret)
+
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+
+		hit := cap.waitHit(t)
+
+		sig := hit.headers.Get("X-Montly-Signature")
+		if sig == "" {
+			t.Fatal("expected X-Montly-Signature header to be set")
+		}
+
+		// Recompute expected HMAC and compare.
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(hit.body)
+		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		if sig != expected {
+			t.Errorf("signature mismatch:\n  got  %q\n  want %q", sig, expected)
+		}
+	})
+
+	t.Run("no signature header when secret is empty", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "") // no secret
+
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+
+		hit := cap.waitHit(t)
+		if sig := hit.headers.Get("X-Montly-Signature"); sig != "" {
+			t.Errorf("expected no signature header, got %q", sig)
+		}
+	})
+}
+
+func TestFireWebhooks_EventFilter(t *testing.T) {
+	t.Run("only fires webhook subscribed to the matching event", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+		completedCap := newWebhookCapture()
+		defer completedCap.close()
+		uncompletedCap := newWebhookCapture()
+		defer uncompletedCap.close()
+
+		db.CreateWebhook(user.ID, completedCap.srv.URL, "task.completed", "")
+		db.CreateWebhook(user.ID, uncompletedCap.srv.URL, "task.uncompleted", "")
+
+		// Fire only the completed event.
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+
+		completedCap.waitHit(t)          // must arrive
+		uncompletedCap.expectNoHit(t)    // must NOT arrive
+	})
+
+	t.Run("fires webhook subscribed to both events", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed,task.uncompleted", "")
+
+		FireWebhooks(db, user.ID, "task.uncompleted", task.ID, task.Title, "2026-04")
+		cap.waitHit(t) // must arrive for uncompleted too
+	})
+
+	t.Run("does not fire when user has no webhooks", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		// No webhooks registered — cap should receive nothing.
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+		cap.expectNoHit(t)
 	})
 }
