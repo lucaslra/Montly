@@ -13,10 +13,14 @@ function fmtMonth(ym) {
     .toLocaleString('default', { month: 'short', year: 'numeric' })
 }
 
+const TASK_TYPES = ['payment', 'subscription', 'bill', 'reminder']
+
 export default function ManageView({ tasks, currency = '$', numberFormat = 'en', onCreate, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(null)
   const [adding, setAdding] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null) // fix 4: task id pending delete
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
 
   // fix 1: keep modal open on error (App re-throws)
   async function handleCreate(title, description, type, metadata, startDate, endDate, interval) {
@@ -33,6 +37,13 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
     } catch { /* error shown by App */ }
   }
 
+  const q = search.trim().toLowerCase()
+  const visibleTasks = tasks.filter(task => {
+    if (typeFilter && task.type !== typeFilter) return false
+    if (q && !task.title.toLowerCase().includes(q) && !(task.description ?? '').toLowerCase().includes(q)) return false
+    return true
+  })
+
   return (
     <div className="manage-view">
       <div className="manage-header">
@@ -40,11 +51,41 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
         <button className="btn-primary" onClick={() => setAdding(true)}>+ Add Task</button>
       </div>
 
+      <div className="manage-filters">
+        <input
+          className="manage-search"
+          type="search"
+          placeholder="Search tasks…"
+          aria-label="Search tasks"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <div className="manage-type-filters" role="group" aria-label="Filter by type">
+          <button
+            className={`type-filter-btn${typeFilter === '' ? ' active' : ''}`}
+            onClick={() => setTypeFilter('')}
+          >
+            All
+          </button>
+          {TASK_TYPES.map(t => (
+            <button
+              key={t}
+              className={`type-filter-btn type-filter-${t}${typeFilter === t ? ' active' : ''}`}
+              onClick={() => setTypeFilter(prev => prev === t ? '' : t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {tasks.length === 0 ? (
         <div className="empty">No tasks yet. Add one above.</div>
+      ) : visibleTasks.length === 0 ? (
+        <div className="empty">No tasks match your filter.</div>
       ) : (
         <ul className="manage-list">
-          {tasks.map(task => (
+          {visibleTasks.map(task => (
             <li
               key={task.id}
               // fix 5: left accent for payment tasks

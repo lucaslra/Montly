@@ -356,6 +356,55 @@ body {
   font-weight: 600;
 }
 
+/* ── Manage filters ── */
+.manage-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.manage-search {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.manage-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.manage-type-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.type-filter-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.type-filter-btn.active,
+.type-filter-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.type-filter-btn.type-filter-payment.active   { background: var(--badge-payment-text);      border-color: var(--badge-payment-text);      color: #fff; }
+.type-filter-btn.type-filter-subscription.active { background: var(--badge-subscription-text); border-color: var(--badge-subscription-text); color: #fff; }
+.type-filter-btn.type-filter-bill.active      { background: var(--badge-bill-text);         border-color: var(--badge-bill-text);         color: #fff; }
+.type-filter-btn.type-filter-reminder.active  { background: var(--badge-reminder-text);     border-color: var(--badge-reminder-text);     color: #fff; }
+
 .manage-list {
   list-style: none;
   display: flex;
