@@ -216,14 +216,24 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	// Idempotent column additions for existing databases.
-	db.Exec(`ALTER TABLE tasks ADD COLUMN type        TEXT NOT NULL DEFAULT ''`)
-	db.Exec(`ALTER TABLE tasks ADD COLUMN metadata    TEXT NOT NULL DEFAULT '{}'`)
-	db.Exec(`ALTER TABLE tasks ADD COLUMN start_date  TEXT NOT NULL DEFAULT ''`)
-	db.Exec(`ALTER TABLE tasks ADD COLUMN end_date    TEXT NOT NULL DEFAULT ''`)
-	db.Exec(`ALTER TABLE tasks ADD COLUMN user_id     INTEGER REFERENCES users(id)`)
-	db.Exec(`ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`)
-	db.Exec(`ALTER TABLE completions ADD COLUMN receipt_file TEXT NOT NULL DEFAULT ''`)
-	db.Exec(`ALTER TABLE completions ADD COLUMN amount       TEXT NOT NULL DEFAULT ''`)
+	// "duplicate column" (SQLite) is the expected error when the column already exists.
+	for _, stmt := range []string{
+		`ALTER TABLE tasks ADD COLUMN type        TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN metadata    TEXT NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE tasks ADD COLUMN start_date  TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN end_date    TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN user_id     INTEGER REFERENCES users(id)`,
+		`ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE completions ADD COLUMN receipt_file TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN amount       TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			msg := err.Error()
+			if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "already exists") {
+				return fmt.Errorf("migration: %w", err)
+			}
+		}
+	}
 
 	// Migrate date columns to nullable TEXT (SQLite table rebuild pattern).
 	// PRAGMA foreign_keys must be OFF during rename: SQLite 3.26+ otherwise rewrites
@@ -338,8 +348,8 @@ func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 		if err != nil {
 			return err
 		}
+		defer tx.Rollback() //nolint:errcheck
 		if _, err := tx.Exec(`ALTER TABLE settings RENAME TO settings_old`); err != nil {
-			tx.Rollback()
 			return err
 		}
 		if _, err := tx.Exec(`CREATE TABLE settings (
@@ -348,15 +358,12 @@ func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 			value   TEXT   NOT NULL DEFAULT '',
 			PRIMARY KEY (user_id, key)
 		)`); err != nil {
-			tx.Rollback()
 			return err
 		}
 		if _, err := tx.Exec(insertStmt, adminID); err != nil {
-			tx.Rollback()
 			return err
 		}
 		if _, err := tx.Exec(`DROP TABLE settings_old`); err != nil {
-			tx.Rollback()
 			return err
 		}
 		return tx.Commit()
@@ -924,7 +931,7 @@ func (db *DB) RevokeToken(id, userID int64) error {
 
 // UpdateTokenLastUsed updates last_used_at; called asynchronously.
 func (db *DB) UpdateTokenLastUsed(id int64) {
-	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(db.q(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`), now, id); err != nil {
 		log.Printf("UpdateTokenLastUsed(%d): %v", id, err)
 	}
