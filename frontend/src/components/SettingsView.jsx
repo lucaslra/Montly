@@ -3,6 +3,7 @@ import {
   changePassword,
   fetchTokens, createToken, revokeToken,
   fetchUsers, createUser, deleteUser,
+  fetchWebhooks, createWebhook, deleteWebhook,
 } from '../api.js'
 import { formatAmount } from '../utils.js'
 
@@ -352,6 +353,145 @@ function UsersSection({ currentUserId }) {
   )
 }
 
+// ---------- Webhooks section ----------
+
+const WEBHOOK_EVENTS = [
+  { value: 'task.completed',   label: 'Task completed' },
+  { value: 'task.uncompleted', label: 'Task uncompleted' },
+]
+
+function WebhooksSection() {
+  const [hooks,    setHooks]    = useState(null)
+  const [url,      setUrl]      = useState('')
+  const [events,   setEvents]   = useState(['task.completed', 'task.uncompleted'])
+  const [secret,   setSecret]   = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error,    setError]    = useState(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+
+  useEffect(() => {
+    fetchWebhooks().then(setHooks).catch(err => setError(err.message))
+  }, [])
+
+  function toggleEvent(ev) {
+    setEvents(prev =>
+      prev.includes(ev) ? prev.filter(e => e !== ev) : [...prev, ev]
+    )
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault()
+    setError(null)
+    if (events.length === 0) { setError('Select at least one event'); return }
+    setCreating(true)
+    try {
+      const hook = await createWebhook(url.trim(), events, secret.trim())
+      setHooks(prev => [...(prev ?? []), hook])
+      setUrl(''); setSecret('')
+      setEvents(['task.completed', 'task.uncompleted'])
+    } catch (err) {
+      setError(err.message ?? 'Failed to create webhook')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function handleDelete(id) {
+    setError(null)
+    setConfirmDeleteId(null)
+    try {
+      await deleteWebhook(id)
+      setHooks(prev => (prev ?? []).filter(h => h.id !== id))
+    } catch (err) {
+      setError(err.message ?? 'Failed to delete webhook')
+    }
+  }
+
+  return (
+    <section className="settings-section-block">
+      <h3 className="settings-section-title">Webhooks</h3>
+      <p className="settings-section-desc">
+        POST a JSON payload to a URL when a task is completed or uncompleted.
+        Optionally set a secret to verify the <code>X-Montly-Signature</code> header (HMAC-SHA256).
+      </p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+
+      <form onSubmit={handleCreate} className="settings-sub-form">
+        <div className="form-group">
+          <label htmlFor="wh-url">URL</label>
+          <input
+            id="wh-url"
+            type="url"
+            placeholder="https://example.com/hook"
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            maxLength={2048}
+            required
+          />
+        </div>
+        <div className="form-group">
+          <label>Events</label>
+          <div className="webhook-events">
+            {WEBHOOK_EVENTS.map(ev => (
+              <label key={ev.value} className="webhook-event-label">
+                <input
+                  type="checkbox"
+                  checked={events.includes(ev.value)}
+                  onChange={() => toggleEvent(ev.value)}
+                />
+                {ev.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="form-group">
+          <label htmlFor="wh-secret">Secret <span className="settings-optional">(optional)</span></label>
+          <input
+            id="wh-secret"
+            type="text"
+            placeholder="signing secret"
+            value={secret}
+            onChange={e => setSecret(e.target.value)}
+            maxLength={200}
+            autoComplete="off"
+          />
+        </div>
+        <button type="submit" className="btn-primary" disabled={creating}>
+          {creating ? 'Creating…' : 'Create webhook'}
+        </button>
+      </form>
+
+      {hooks === null ? (
+        <p className="settings-empty">Loading…</p>
+      ) : hooks.length > 0 ? (
+        <ul className="settings-list">
+          {hooks.map(hook => (
+            <li key={hook.id} className="settings-list-item">
+              <div className="settings-list-info">
+                <span className="settings-list-name webhook-url">{hook.url}</span>
+                <span className="settings-list-meta">
+                  {hook.events.split(',').join(' · ')} · Created {hook.created_at?.slice(0, 10)}
+                </span>
+              </div>
+              {confirmDeleteId === hook.id ? (
+                <span className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
+                  <span className="delete-confirm-label">Delete?</span>
+                  <button className="btn-icon btn-danger btn-sm" onClick={() => handleDelete(hook.id)}>Yes</button>
+                  <button className="btn-icon btn-sm" onClick={() => setConfirmDeleteId(null)}>No</button>
+                </span>
+              ) : (
+                <button className="btn-danger btn-sm" onClick={() => setConfirmDeleteId(hook.id)}>Delete</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="settings-empty">No webhooks yet.</p>
+      )}
+    </section>
+  )
+}
+
 // ---------- Main SettingsView ----------
 
 export default function SettingsView({ settings, onSave, user }) {
@@ -509,6 +649,7 @@ export default function SettingsView({ settings, onSave, user }) {
 
       <PasswordSection />
       <TokensSection />
+      <WebhooksSection />
       {user?.is_admin && <UsersSection currentUserId={user.id} />}
     </div>
   )

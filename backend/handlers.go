@@ -408,7 +408,8 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, req.TaskID, currentUser(r).UserID); !ok {
+	task, ok := h.taskOwnerCheck(w, req.TaskID, currentUser(r).UserID)
+	if !ok {
 		return
 	}
 
@@ -417,6 +418,8 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to check completion", err)
 		return
 	}
+
+	userID := currentUser(r).UserID
 
 	if found {
 		// Remove DB record first; delete file only after DB confirms success.
@@ -427,12 +430,14 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 		safeRemoveReceipt(h.receiptsDir, receiptFile)
 		writeJSON(w, map[string]bool{"completed": false})
+		go FireWebhooks(h.db, userID, "task.uncompleted", task.ID, task.Title, req.Month)
 	} else {
 		if _, err := h.db.AddCompletion(req.TaskID, req.Month); err != nil {
 			writeServerError(w, "failed to add completion", err)
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
+		go FireWebhooks(h.db, userID, "task.completed", task.ID, task.Title, req.Month)
 	}
 }
 
