@@ -13,7 +13,14 @@ async function request(path, options = {}) {
   return data
 }
 
-export const fetchMe = () => request('/auth/me')
+export const fetchMe          = () => request('/auth/me')
+export const fetchSetupStatus = () => request('/auth/setup')
+export const setupAdmin = (username, password) =>
+  request('/auth/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
 export const login = (username, password) =>
   request('/auth/login', {
     method: 'POST',
