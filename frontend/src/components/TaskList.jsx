@@ -26,30 +26,23 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
         return (
           <li
             key={task.id}
-            role="button"
-            aria-pressed={done}
-            tabIndex={0}
             className={`task-item${done ? ' completed' : ''}`}
-            onClick={() => {
-              if (showConfirm) { setConfirmUndo(null); return }
-              if (done && completion?.receipt_file) {
-                setConfirmUndo(task.id)
-              } else {
-                onToggle(task.id)
-              }
-            }}
-            onKeyDown={e => {
-              if (e.key !== 'Enter' && e.key !== ' ') return
-              if (e.key === ' ') e.preventDefault()
-              if (showConfirm) { setConfirmUndo(null); return }
-              if (done && completion?.receipt_file) {
-                setConfirmUndo(task.id)
-              } else {
-                onToggle(task.id)
-              }
-            }}
           >
-            <span className="task-checkbox" aria-hidden="true">{done ? '✓' : ''}</span>
+            <button
+              className="task-toggle-btn"
+              aria-pressed={done}
+              aria-label={`${done ? 'Unmark' : 'Mark'} "${task.title}"`}
+              onClick={() => {
+                if (showConfirm) { setConfirmUndo(null); return }
+                if (done && completion?.receipt_file) {
+                  setConfirmUndo(task.id)
+                } else {
+                  onToggle(task.id)
+                }
+              }}
+            >
+              <span className="task-checkbox" aria-hidden="true">{done ? '✓' : ''}</span>
+            </button>
             <div className="task-content">
               <div className="task-title-row">
                 <span className="task-title">{task.title}</span>
@@ -81,7 +74,6 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
                   role="status"
                   aria-live="polite"
                   aria-atomic="true"
-                  onClick={e => e.stopPropagation()}
                 >
                   <span className="undo-confirm-label">Removes attached receipt.</span>
                   <button
