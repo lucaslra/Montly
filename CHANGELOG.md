@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.1] — 2026-04-23
+
+### Added
+- Expanded frontend test suite from 63 tests (5 files) to 189 tests (11 files)
+  - `App.test.jsx` — auth state machine, month navigation, optimistic toggle, toast notifications, error handling
+  - `SettingsView.test.jsx` — settings form, API token management, user management (admin)
+  - `ReportView.test.jsx` — chart rendering, stat cards, loading/empty states
+  - `ManageView.test.jsx` — task list rendering, search/type filters, edit/create/delete flows
+  - `SetupView.test.jsx` — first-run registration form, password validation, show/hide toggle, API errors
+  - `utils.test.js` — `formatAmount` for en and eu number formats
+  - `api.test.js` — expanded coverage: all API functions, AbortSignal, error propagation
+
 ## [0.3.0] — 2026-04-23
 
 ### Added

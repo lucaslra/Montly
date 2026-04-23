@@ -11,8 +11,9 @@ Stack: Go 1.25, Chi router, modernc.org/sqlite (pure Go, no CGO), multipart file
 File layout:
 - `main.go` — Chi router setup, go:embed, server config, first-run bootstrap
 - `db.go` — all SQLite queries + idempotent migrations
-- `handlers.go` — HTTP handlers (settings, tasks, completions, receipt upload/serve)
-- `auth.go` — authentication middleware, session handling, login/logout, API token CRUD, first-run setup handlers (SetupStatus, Setup)
+- `handlers.go` — HTTP handlers (settings, tasks, completions, receipt upload/serve, CSV export)
+- `auth.go` — authentication middleware, session handling, login/logout, API token CRUD, first-run setup handlers (SetupStatus, Setup), user management (admin)
+- `webhooks.go` — webhook CRUD handlers, HMAC-signed outbound delivery (FireWebhooks), event allowlist
 
 Key behaviours to be aware of:
 - First-run setup: `GET /api/auth/setup` and `POST /api/auth/setup` are public (no auth). `Setup` checks `CountUsers() == 0` before creating the admin. Both env-var bootstrap (ADMIN_USERNAME/ADMIN_PASSWORD) and UI-based setup are supported.

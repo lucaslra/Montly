@@ -37,7 +37,7 @@ Areas to analyze:
 - Final image size
 
 **Test suite**
-- Frontend tests use Vitest + jsdom (`frontend/src/test/`); 63 tests across 5 files
+- Frontend tests use Vitest + jsdom (`frontend/src/test/`); 189 tests across 11 files
 - Backend tests use `go test` (`backend/*_test.go`)
 - Flag slow tests or tests that do expensive setup on every case
 

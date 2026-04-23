@@ -7,11 +7,12 @@ This guide covers deploying montly on a self-hosted server with HTTPS, either be
 ## Quick start (local / LAN, no HTTPS)
 
 ```bash
-# First run — set credentials
-ADMIN_USERNAME=admin ADMIN_PASSWORD=changeme docker compose up -d
+docker compose up -d
 ```
 
-The app listens on `127.0.0.1:8080`. Reach it at `http://localhost:8080`.
+Open `http://localhost:8080` — on first access you'll be prompted to create the admin account through the UI.
+
+> **Automated / headless deployment:** Pass `ADMIN_USERNAME` and `ADMIN_PASSWORD` as environment variables to skip the UI setup and create the admin account on startup instead.
 
 ---
 
@@ -21,8 +22,8 @@ The app listens on `127.0.0.1:8080`. Reach it at `http://localhost:8080`.
 |--------------------|--------------|-------------|
 | `PORT`             | `8080`       | TCP port to listen on |
 | `DATA_DIR`         | `./data`     | Directory for SQLite file and receipt uploads |
-| `ADMIN_USERNAME`   | *(required on first run)* | Username for the initial admin account |
-| `ADMIN_PASSWORD`   | *(required on first run)* | Password — must be ≥ 8 characters |
+| `ADMIN_USERNAME`   | *(optional)*  | Username for the initial admin account; omit to use the first-run UI setup instead |
+| `ADMIN_PASSWORD`   | *(optional)*  | Password for the initial admin account — must be ≥ 8 characters |
 | `SESSION_SECRET`   | *(random)*   | HMAC key for session cookies. Set a stable value so sessions survive restarts |
 | `SECURE_COOKIES`   | `false`      | Set `true` when serving over HTTPS — adds `Secure` flag and HSTS header |
 | `DB_TYPE`          | `sqlite`     | `sqlite` or `postgres` |
@@ -170,7 +171,7 @@ Receipt uploads live in `<DATA_DIR>/receipts/`. Include this directory in your b
 
 ## Multi-user setup
 
-1. Deploy with `ADMIN_USERNAME` and `ADMIN_PASSWORD` on first run — this creates the admin account.
+1. On first access, create the admin account through the UI registration form (or via `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars for automated deployments).
 2. Log in as the admin, open **Settings → Users**, and create additional accounts.
 3. Each user has isolated tasks, completions, and settings.
 4. Admins can create and delete users; regular users can only manage their own data.

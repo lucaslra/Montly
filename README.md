@@ -57,9 +57,12 @@ All endpoints live under `/api` and `/api/v1` (both are equivalent). Authenticat
 ```
 GET    /api/auth/setup                           — {"needs_setup": bool}, public
 POST   /api/auth/setup                           — create first admin + open session
+GET    /api/auth/me
+PATCH  /api/auth/password
 
 GET    /api/tasks?month=YYYY-MM
 POST   /api/tasks
+GET    /api/tasks/:id
 PUT    /api/tasks/:id
 DELETE /api/tasks/:id
 
@@ -75,6 +78,16 @@ PUT    /api/settings
 GET    /api/auth/tokens
 POST   /api/auth/tokens
 DELETE /api/auth/tokens/:id
+
+GET    /api/webhooks                             — list webhooks (events: task.completed, task.uncompleted)
+POST   /api/webhooks
+DELETE /api/webhooks/:id
+
+GET    /api/users                                — admin only
+POST   /api/users                                — admin only
+DELETE /api/users/:id                            — admin only
+
+GET    /api/export/completions.csv
 ```
 
 Every response includes `X-API-Version: 1`.

@@ -9,7 +9,7 @@ Launch these six agents **simultaneously** (single message, multiple Agent tool 
 5. **ui-ux** — layout, interaction clarity, feedback states, visual hierarchy, mobile readiness
 6. **mobile** — touch targets, viewport behaviour, iOS/Android quirks, PWA readiness
 
-After all five return, produce a single report structured as:
+After all six return, produce a single report structured as:
 
 ## Review Report
 

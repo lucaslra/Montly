@@ -19,6 +19,10 @@ Key attack surfaces in this app:
 - `POST /api/completions/:task_id/:month/receipt` — accepts pdf, jpg, jpeg, png, webp, gif
 - `GET /api/receipts/:filename` — serves files from DATA_DIR/receipts/
 
+**Webhooks**
+- `POST /api/webhooks` — stores a user-supplied URL; fired on `task.completed` / `task.uncompleted` events
+- Check: is the stored URL validated (SSRF risk)? Are outbound requests scoped to http/https? Is the HMAC signature (X-Montly-Signature) correctly computed and documented?
+
 **Data layer**
 - SQLite queries in `db.go` — look for injection vectors
 - Task/completion metadata — JSON stored as text, check for injection on output
