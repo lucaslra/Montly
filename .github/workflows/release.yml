@@ -56,7 +56,7 @@ jobs:
             ## Docker
 
             ```
-            docker pull ghcr.io/${{ github.repository_owner }}/montly:${{ github.ref_name }}
+            docker pull ghcr.io/${{ github.repository_owner }}/montly:${{ steps.meta.outputs.version }}
             ```
 
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what changed.
