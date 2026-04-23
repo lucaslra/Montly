@@ -15,7 +15,7 @@ Areas to analyze:
 - N+1 query patterns — are completions fetched per-task or in a single query?
 - Unnecessary full-table scans
 
-**Go handlers (handlers.go)**
+**Go handlers (handlers.go, auth.go)**
 - Unnecessary allocations in hot paths
 - JSON marshaling efficiency
 - Redundant DB round-trips within a single request
@@ -23,11 +23,13 @@ Areas to analyze:
 **React frontend**
 - Unnecessary re-renders: state shape in App.jsx, Map re-creation on every toggle
 - Missing memoization (useMemo, useCallback) where it would actually help
+- `ReportView.jsx` fires 9 parallel fetches (6 history + 3 forecast) on mount — check if this saturates the server or causes noticeable waterfall on slow connections
+- `sortedTasks` useMemo in App.jsx re-sorts on every completionMap change — acceptable for <1000 tasks but worth noting
 - Component splitting opportunities to reduce re-render scope
 
 **Vite build**
 - Bundle size: are there large dependencies that could be avoided or lazy-loaded?
-- Code splitting opportunities
+- Code splitting opportunities (e.g. ReportView is only shown on demand)
 
 **Docker image**
 - Multi-stage build efficiency

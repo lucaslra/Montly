@@ -1,6 +1,6 @@
 # Montly
 
-Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, multi-user support, and a clean mobile-friendly UI.
+Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI.
 
 ## Features
 
@@ -8,21 +8,21 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 - **Task types** — payment, subscription, bill, reminder (or none)
 - **Completion tracking** — mark tasks done per month, attach receipt files (PDF, image)
 - **Amount logging** — record the actual amount paid per completion
+- **Reports** — monthly spending bar chart with 6-month history and 3-month forecast, category donut chart, and stat cards (YTD/fiscal-year-to-date, monthly average, peak month, next forecast)
 - **Multi-user** — isolated data per user; admin can create/delete accounts
+- **First-run setup** — create the admin account through the UI on first access; no env vars needed
 - **API tokens** — headless / mobile client access via `Bearer mt_…` tokens
-- **Settings** — per-user currency symbol, date format, color mode (light/dark/system)
+- **Settings** — per-user currency symbol, date format, color mode (light/dark/system), task sort order, completed-task position, fiscal year start month, number format (1,234.56 or 1.234,56)
 - **Two databases** — SQLite (default, zero-config) or PostgreSQL
 - **Self-contained** — single Docker image, no external services required for SQLite mode
 
 ## Quick start
 
 ```bash
-cp .env.example .env
-# Edit .env and set ADMIN_USERNAME and ADMIN_PASSWORD
 docker compose up -d
 ```
 
-Open `http://localhost:8080`.
+Open `http://localhost:8080` — on first access you'll be prompted to create the admin account.
 
 > **HTTPS:** See [docs/deployment.md](docs/deployment.md) for reverse proxy setup (Caddy or nginx) and production configuration.
 
@@ -55,6 +55,9 @@ make up
 All endpoints live under `/api` and `/api/v1` (both are equivalent). Authenticate with a session cookie (web UI) or an `Authorization: Bearer mt_<token>` header (API tokens).
 
 ```
+GET    /api/auth/setup                           — {"needs_setup": bool}, public
+POST   /api/auth/setup                           — create first admin + open session
+
 GET    /api/tasks?month=YYYY-MM
 POST   /api/tasks
 PUT    /api/tasks/:id
