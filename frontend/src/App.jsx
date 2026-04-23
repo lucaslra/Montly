@@ -356,34 +356,32 @@ export default function App() {
             >
               <span aria-hidden="true">{isDark ? '☀' : '☾'}</span>
             </button>
-            {view === 'settings' || view === 'report' ? (
-              <button className="view-toggle" onClick={() => setView('monthly')}>← Back</button>
-            ) : (
-              <>
-                <button
-                  className={`view-toggle${view === 'manage' ? ' active' : ''}`}
-                  onClick={() => setView(v => v === 'monthly' ? 'manage' : 'monthly')}
-                >
-                  {view === 'monthly' ? 'Manage' : '← Back'}
-                </button>
-                <button
-                  className="settings-btn"
-                  onClick={() => setView('report')}
-                  title="Reports"
-                  aria-label="Reports"
-                >
-                  <span aria-hidden="true">📊</span>
-                </button>
-                <button
-                  className="settings-btn"
-                  onClick={() => setView('settings')}
-                  title="Settings"
-                  aria-label="Settings"
-                >
-                  <span aria-hidden="true">⚙</span>
-                </button>
-              </>
-            )}
+            <>
+              <button
+                className={`view-toggle${view === 'manage' ? ' active' : ''}`}
+                onClick={() => setView(v => v === 'monthly' ? 'manage' : 'monthly')}
+              >
+                {view === 'monthly' ? 'Manage' : '← Back'}
+              </button>
+              <button
+                className={`settings-btn${view === 'report' ? ' active' : ''}`}
+                onClick={() => setView(v => v === 'report' ? 'monthly' : 'report')}
+                title="Reports"
+                aria-label="Reports"
+                aria-pressed={view === 'report'}
+              >
+                <span aria-hidden="true">📊</span>
+              </button>
+              <button
+                className={`settings-btn${view === 'settings' ? ' active' : ''}`}
+                onClick={() => setView(v => v === 'settings' ? 'monthly' : 'settings')}
+                title="Settings"
+                aria-label="Settings"
+                aria-pressed={view === 'settings'}
+              >
+                <span aria-hidden="true">⚙</span>
+              </button>
+            </>
             <button
               className="logout-btn"
               onClick={handleLogout}
@@ -483,6 +481,7 @@ export default function App() {
           <ManageView
             tasks={tasks}
             currency={settings.currency}
+            numberFormat={settings.number_format}
             onCreate={handleCreate}
             onUpdate={handleUpdate}
             onDelete={handleDelete}
