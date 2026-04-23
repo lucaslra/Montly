@@ -42,6 +42,7 @@ type sessionClaims struct {
 const (
 	sessionCookieName = "_montly"
 	sessionDuration   = 24 * time.Hour
+	bcryptCost        = 12
 )
 
 // dummyHash is used to perform a constant-time bcrypt comparison when a
@@ -50,7 +51,7 @@ var dummyHash []byte
 
 func init() {
 	var err error
-	dummyHash, err = bcrypt.GenerateFromPassword([]byte("_dummy_"), bcrypt.DefaultCost)
+	dummyHash, err = bcrypt.GenerateFromPassword([]byte("_dummy_"), bcryptCost)
 	if err != nil {
 		log.Fatalf("bcrypt init: %v", err)
 	}
@@ -307,7 +308,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		writeServerError(w, "failed to hash password", err)
 		return
@@ -389,7 +390,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	h.rl.recordSuccess(ip)
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcryptCost)
 	if err != nil {
 		writeServerError(w, "failed to hash password", err)
 		return
@@ -439,7 +440,7 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		writeServerError(w, "failed to hash password", err)
 		return

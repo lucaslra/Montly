@@ -241,10 +241,10 @@ func migrate(db *sql.DB) error {
 	var notNull int
 	db.QueryRow(`SELECT "notnull" FROM pragma_table_info('tasks') WHERE name='start_date'`).Scan(&notNull)
 	if notNull == 1 {
-		db.Exec(`PRAGMA foreign_keys = OFF`)
+		db.Exec(`PRAGMA foreign_keys = OFF`)           //nolint:errcheck
+		defer db.Exec(`PRAGMA foreign_keys = ON`)       //nolint:errcheck
 		tx, err := db.Begin()
 		if err != nil {
-			db.Exec(`PRAGMA foreign_keys = ON`)
 			return fmt.Errorf("begin tasks rebuild tx: %w", err)
 		}
 		defer tx.Rollback() //nolint:errcheck
@@ -274,7 +274,6 @@ func migrate(db *sql.DB) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit tasks rebuild: %w", err)
 		}
-		db.Exec(`PRAGMA foreign_keys = ON`)
 	}
 
 	// One-time repair: fix completions FK broken by a previous migration run that
@@ -282,10 +281,10 @@ func migrate(db *sql.DB) error {
 	var fkTable string
 	db.QueryRow(`SELECT "table" FROM pragma_foreign_key_list('completions') LIMIT 1`).Scan(&fkTable)
 	if fkTable == "tasks_old" {
-		db.Exec(`PRAGMA foreign_keys = OFF`)
+		db.Exec(`PRAGMA foreign_keys = OFF`)           //nolint:errcheck
+		defer db.Exec(`PRAGMA foreign_keys = ON`)       //nolint:errcheck
 		tx, err := db.Begin()
 		if err != nil {
-			db.Exec(`PRAGMA foreign_keys = ON`)
 			return fmt.Errorf("begin completions repair tx: %w", err)
 		}
 		defer tx.Rollback() //nolint:errcheck
@@ -311,7 +310,6 @@ func migrate(db *sql.DB) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit completions repair: %w", err)
 		}
-		db.Exec(`PRAGMA foreign_keys = ON`)
 	}
 
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_completions_task_month ON completions(task_id, month)`)
