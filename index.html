@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Montly — Self-hosted monthly task tracker</title>
+  <meta name="description" content="Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI. Self-hosted, open source.">
+  <meta property="og:title" content="Montly — Self-hosted monthly task tracker">
+  <meta property="og:description" content="Track bills, subscriptions, payments, and reminders. Self-hosted, open source, Docker-ready.">
+  <meta property="og:image" content="screenshots/tasks.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- NAV -->
+  <header class="nav">
+    <div class="nav-inner">
+      <span class="nav-logo">Montly</span>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/lucaslra/Montly" class="btn btn-ghost">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-text">
+        <h1>Never miss a payment<br>or subscription again.</h1>
+        <p class="hero-sub">
+          Montly is a self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI.
+        </p>
+        <div class="hero-actions">
+          <a href="#install" class="btn btn-primary">Get started</a>
+          <a href="https://github.com/lucaslra/Montly" class="btn btn-outline">View on GitHub</a>
+        </div>
+        <p class="hero-note">Free and open source &mdash; MIT license &mdash; no account required</p>
+      </div>
+      <div class="hero-screenshot">
+        <img src="screenshots/tasks.png" alt="Montly task list — monthly overview with progress and amounts" width="600">
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="container">
+      <h2>Everything you need to stay on top of recurring tasks</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">&#128197;</div>
+          <h3>Recurring tasks</h3>
+          <p>Monthly, bi-monthly, quarterly, semi-annual, or annual intervals. Tasks recur automatically — no re-entry needed.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#9989;</div>
+          <h3>Completion tracking</h3>
+          <p>Mark tasks done, skip a month, or log the actual amount paid. Three states: pending, completed, skipped.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128179;</div>
+          <h3>Receipt uploads</h3>
+          <p>Attach PDFs or images to each completion. Stored securely, served only to the owning user.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128202;</div>
+          <h3>Spending reports</h3>
+          <p>Monthly bar chart with 6-month history and 3-month forecast, category donut, YTD totals, and peak-month stats.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128100;</div>
+          <h3>Multi-user</h3>
+          <p>Isolated data per user. Admin can create and delete accounts. Each user has their own settings and tasks.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128274;</div>
+          <h3>API tokens &amp; webhooks</h3>
+          <p>Headless access via <code>Bearer mt_…</code> tokens. Outbound webhooks on task completion, uncompletion, and skip.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128296;</div>
+          <h3>Zero-dependency setup</h3>
+          <p>Single Docker image with embedded frontend. SQLite by default — no external services required.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128203;</div>
+          <h3>Audit log</h3>
+          <p>Append-only log of who completed, edited, deleted, or skipped tasks and who managed users or tokens.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCREENSHOTS -->
+  <section class="screenshots">
+    <div class="container">
+      <h2>A closer look</h2>
+      <div class="screenshot-grid">
+        <figure>
+          <img src="screenshots/tasks.png" alt="Task list view" loading="lazy">
+          <figcaption>Task list &mdash; monthly overview with progress and amounts</figcaption>
+        </figure>
+        <figure>
+          <img src="screenshots/reports.png" alt="Reports view" loading="lazy">
+          <figcaption>Reports &mdash; spending history, forecast, and category breakdown</figcaption>
+        </figure>
+        <figure class="screenshot-mobile">
+          <img src="screenshots/mobile.png" alt="Mobile view" loading="lazy">
+          <figcaption>Mobile &mdash; touch-friendly, works on any device</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section class="install" id="install">
+    <div class="container">
+      <h2>Up and running in under a minute</h2>
+      <p class="install-sub">Requires Docker with Compose v2 (<code>docker compose</code>).</p>
+      <div class="code-block">
+        <pre><code>git clone https://github.com/lucaslra/Montly.git
+cd Montly
+docker compose up -d</code></pre>
+      </div>
+      <p class="install-note">
+        Open <strong>http://localhost:8080</strong> — on first access you'll be prompted to create the admin account.
+      </p>
+      <div class="install-links">
+        <a href="https://github.com/lucaslra/Montly/blob/main/docs/deployment.md" class="btn btn-primary">Full deployment guide</a>
+        <a href="https://github.com/lucaslra/Montly/blob/main/CHANGELOG.md" class="btn btn-outline">Changelog</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- STACK -->
+  <section class="stack">
+    <div class="container">
+      <h2>Built on proven, boring technology</h2>
+      <div class="stack-grid">
+        <div class="stack-item">
+          <strong>Go 1.25</strong>
+          <span>Chi router &middot; pure-Go SQLite (no CGO)</span>
+        </div>
+        <div class="stack-item">
+          <strong>React 19 + Vite</strong>
+          <span>Plain CSS &middot; hooks pattern &middot; no UI framework</span>
+        </div>
+        <div class="stack-item">
+          <strong>SQLite / PostgreSQL</strong>
+          <span>WAL mode &middot; foreign keys &middot; parameterised queries</span>
+        </div>
+        <div class="stack-item">
+          <strong>Docker</strong>
+          <span>Multi-stage build &middot; non-root user &middot; embedded frontend</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-inner">
+        <span class="footer-logo">Montly</span>
+        <nav class="footer-links">
+          <a href="https://github.com/lucaslra/Montly">GitHub</a>
+          <a href="https://github.com/lucaslra/Montly/releases">Releases</a>
+          <a href="https://github.com/lucaslra/Montly/blob/main/docs/deployment.md">Deployment</a>
+          <a href="https://github.com/lucaslra/Montly/blob/main/CONTRIBUTING.md">Contributing</a>
+          <a href="https://github.com/lucaslra/Montly/blob/main/SECURITY.md">Security</a>
+          <a href="https://github.com/lucaslra/Montly/blob/main/LICENSE">MIT License</a>
+        </nav>
+      </div>
+      <p class="footer-copy">Self-hosted &mdash; no telemetry &mdash; your data stays on your server.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
