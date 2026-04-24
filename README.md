@@ -39,8 +39,8 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 **Requires:** Docker with Compose v2 (`docker compose`).
 
 ```bash
-git clone <repo-url>
-cd montly
+git clone https://github.com/lucaslra/Montly.git
+cd Montly
 docker compose up -d
 ```
 

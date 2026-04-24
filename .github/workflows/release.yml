@@ -49,6 +49,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Extract changelog
+        id: changelog
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          {
+            echo "body<<EOF"
+            awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -59,4 +69,4 @@ jobs:
             docker pull ghcr.io/${{ github.repository_owner }}/montly:${{ steps.meta.outputs.version }}
             ```
 
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what changed.
+            ${{ steps.changelog.outputs.body }}
