@@ -16,6 +16,7 @@
   <meta name="twitter:title" content="Montly — Self-hosted monthly task tracker">
   <meta name="twitter:description" content="Track bills, subscriptions, payments, and reminders. Self-hosted, open source, Docker-ready.">
   <meta name="twitter:image" content="https://lucaslra.github.io/Montly/screenshots/tasks.png">
+  <meta name="theme-color" content="#0f1117">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -37,8 +38,8 @@
   <section class="hero">
     <div class="hero-inner">
       <div class="hero-text">
-        <a href="https://github.com/lucaslra/Montly/releases/tag/v0.7.0" class="version-badge">v0.7.0</a>
-        <h1>Never miss a payment<br>or subscription again.</h1>
+        <a href="https://github.com/lucaslra/Montly/releases/tag/v0.10.0" class="version-badge">v0.10.0</a>
+        <h1>Never miss a payment or subscription again.</h1>
         <p class="hero-sub">
           Montly is a self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI.
         </p>
@@ -46,10 +47,10 @@
           <a href="#install" class="btn btn-primary">Get started</a>
           <a href="https://github.com/lucaslra/Montly" class="btn btn-outline">View on GitHub</a>
         </div>
-        <p class="hero-note">Free and open source &mdash; MIT license &mdash; no account required</p>
+        <p class="hero-note">Free and open source &mdash; MIT license &mdash; no cloud account or subscription required</p>
       </div>
       <div class="hero-screenshot">
-        <img src="screenshots/tasks.png" alt="Montly task list — monthly overview with progress and amounts" width="600">
+        <img src="screenshots/tasks.png" alt="Montly task list — monthly overview with progress and amounts" width="600" height="375">
       </div>
     </div>
   </section>
@@ -87,7 +88,7 @@
         <div class="feature-card">
           <div class="feature-icon">&#128274;</div>
           <h3>API tokens &amp; webhooks</h3>
-          <p>Headless access via <code>Bearer mt_…</code> tokens. Outbound webhooks on task completion, uncompletion, and skip.</p>
+          <p>Headless access via <code>Bearer mt_…</code> tokens. Outbound webhooks on task completion, uncompletion, skip, and monthly digest.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">&#128296;</div>
@@ -114,15 +115,11 @@
       <h2>A closer look</h2>
       <div class="screenshot-grid">
         <figure>
-          <img src="screenshots/tasks.png" alt="Task list view" loading="lazy">
-          <figcaption>Task list &mdash; monthly overview with progress and amounts</figcaption>
-        </figure>
-        <figure>
-          <img src="screenshots/reports.png" alt="Reports view" loading="lazy">
+          <img src="screenshots/reports.png" alt="Reports view" loading="lazy" width="1280" height="800">
           <figcaption>Reports &mdash; spending history, forecast, and category breakdown</figcaption>
         </figure>
         <figure class="screenshot-mobile">
-          <img src="screenshots/mobile.png" alt="Mobile view" loading="lazy">
+          <img src="screenshots/mobile.png" alt="Mobile view" loading="lazy" width="390" height="844">
           <figcaption>Mobile &mdash; touch-friendly, works on any device</figcaption>
         </figure>
       </div>
@@ -135,6 +132,7 @@
       <h2>Up and running in under a minute</h2>
       <p class="install-sub">Requires Docker with Compose v2 (<code>docker compose</code>).</p>
       <div class="code-block">
+        <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
         <pre><code>git clone https://github.com/lucaslra/Montly.git
 cd Montly
 docker compose up -d</code></pre>
@@ -149,6 +147,7 @@ docker compose up -d</code></pre>
       <div class="install-alt">
         <span class="install-alt-label">Or pull the pre-built image:</span>
         <div class="code-block">
+          <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
           <pre><code>docker pull ghcr.io/lucaslra/montly:latest</code></pre>
         </div>
       </div>
@@ -169,8 +168,8 @@ docker compose up -d</code></pre>
           <span>Plain CSS &middot; hooks pattern &middot; no UI framework</span>
         </div>
         <div class="stack-item">
-          <strong>SQLite / PostgreSQL</strong>
-          <span>WAL mode &middot; foreign keys &middot; parameterised queries</span>
+          <strong>SQLite</strong>
+          <span>WAL mode &middot; foreign keys &middot; parameterised queries &middot; pure Go (no CGO)</span>
         </div>
         <div class="stack-item">
           <strong>Docker</strong>
@@ -198,5 +197,17 @@ docker compose up -d</code></pre>
     </div>
   </footer>
 
+  <script>
+    document.querySelectorAll('.copy-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var code = btn.parentElement.querySelector('code').textContent;
+        navigator.clipboard.writeText(code).then(function() {
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+        });
+      });
+    });
+  </script>
 </body>
 </html>
