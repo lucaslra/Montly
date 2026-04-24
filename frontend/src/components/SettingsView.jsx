@@ -4,6 +4,7 @@ import {
   fetchTokens, createToken, revokeToken,
   fetchUsers, createUser, deleteUser,
   fetchWebhooks, createWebhook, deleteWebhook,
+  fetchAuditLogs,
 } from '../api.js'
 import { formatAmount } from '../utils.js'
 
@@ -492,6 +493,101 @@ function WebhooksSection() {
   )
 }
 
+// ---------- Audit Log section (admin only) ----------
+
+const ACTION_LABELS = {
+  complete:       'Completed',
+  uncomplete:     'Uncompleted',
+  skip:           'Skipped',
+  unskip:         'Un-skipped',
+  create:         'Created',
+  update:         'Updated',
+  delete:         'Deleted',
+  create_user:    'Created user',
+  delete_user:    'Deleted user',
+  change_password:'Changed password',
+  create_token:   'Created token',
+  revoke_token:   'Revoked token',
+  create_webhook: 'Created webhook',
+  delete_webhook: 'Deleted webhook',
+}
+
+function AuditLogSection() {
+  const [data,    setData]    = useState(null)  // { logs, total }
+  const [offset,  setOffset]  = useState(0)
+  const [error,   setError]   = useState(null)
+  const limit = 50
+
+  useEffect(() => {
+    setData(null)
+    setError(null)
+    fetchAuditLogs(limit, offset)
+      .then(setData)
+      .catch(err => setError(err.message))
+  }, [offset])
+
+  const total = data?.total ?? 0
+  const logs  = data?.logs  ?? []
+  const page  = Math.floor(offset / limit) + 1
+  const pages = Math.ceil(total / limit) || 1
+
+  return (
+    <section className="settings-section-block">
+      <h3 className="settings-section-title">Audit Log</h3>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {data === null && !error && <p className="settings-empty">Loading…</p>}
+      {data !== null && logs.length === 0 && (
+        <p className="settings-empty">No activity recorded yet.</p>
+      )}
+      {logs.length > 0 && (
+        <>
+          <div className="audit-log-scroll">
+            <table className="audit-log-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>User</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map(log => (
+                  <tr key={log.id}>
+                    <td className="audit-log-time">{log.created_at.slice(0, 16).replace('T', ' ')}</td>
+                    <td>{log.username}</td>
+                    <td>{ACTION_LABELS[log.action] ?? log.action}</td>
+                    <td className="audit-log-label">
+                      {log.entity_type}{log.entity_label ? `: ${log.entity_label}` : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="audit-log-pagination">
+            <button
+              className="btn-secondary btn-sm"
+              onClick={() => setOffset(o => Math.max(0, o - limit))}
+              disabled={offset === 0}
+            >
+              ‹ Prev
+            </button>
+            <span>Page {page} of {pages} ({total} entries)</span>
+            <button
+              className="btn-secondary btn-sm"
+              onClick={() => setOffset(o => o + limit)}
+              disabled={offset + limit >= total}
+            >
+              Next ›
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
 // ---------- Main SettingsView ----------
 
 export default function SettingsView({ settings, onSave, user }) {
@@ -651,6 +747,7 @@ export default function SettingsView({ settings, onSave, user }) {
       <TokensSection />
       <WebhooksSection />
       {user?.is_admin && <UsersSection currentUserId={user.id} />}
+      {user?.is_admin && <AuditLogSection />}
     </div>
   )
 }

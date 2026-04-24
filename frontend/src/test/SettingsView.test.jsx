@@ -5,16 +5,17 @@ import SettingsView from '../components/SettingsView.jsx'
 import * as api from '../api.js'
 
 vi.mock('../api.js', () => ({
-  changePassword: vi.fn(),
-  fetchTokens:    vi.fn(),
-  createToken:    vi.fn(),
-  revokeToken:    vi.fn(),
-  fetchUsers:     vi.fn(),
-  createUser:     vi.fn(),
-  deleteUser:     vi.fn(),
-  fetchWebhooks:  vi.fn(),
-  createWebhook:  vi.fn(),
-  deleteWebhook:  vi.fn(),
+  changePassword:  vi.fn(),
+  fetchTokens:     vi.fn(),
+  createToken:     vi.fn(),
+  revokeToken:     vi.fn(),
+  fetchUsers:      vi.fn(),
+  createUser:      vi.fn(),
+  deleteUser:      vi.fn(),
+  fetchWebhooks:   vi.fn(),
+  createWebhook:   vi.fn(),
+  deleteWebhook:   vi.fn(),
+  fetchAuditLogs:  vi.fn(),
 }))
 
 const defaultSettings = {
@@ -30,6 +31,7 @@ beforeEach(() => {
   api.fetchTokens.mockResolvedValue([])
   api.fetchWebhooks.mockResolvedValue([])
   api.fetchUsers.mockResolvedValue([])
+  api.fetchAuditLogs.mockResolvedValue({ logs: [], total: 0 })
 })
 
 afterEach(() => vi.clearAllMocks())

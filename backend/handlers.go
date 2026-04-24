@@ -315,11 +315,13 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	task, err := h.db.CreateTask(req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, currentUser(r).UserID, req.Interval)
+	userID := currentUser(r).UserID
+	task, err := h.db.CreateTask(req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, userID, req.Interval)
 	if err != nil {
 		writeServerError(w, "failed to create task", err)
 		return
 	}
+	go h.db.InsertAuditLog(userID, "create", "task", task.ID, task.Title)
 	writeJSONCreated(w, task)
 }
 
@@ -345,6 +347,7 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to update task", err)
 		return
 	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "update", "task", task.ID, task.Title)
 	writeJSON(w, task)
 }
 
@@ -370,6 +373,7 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	for _, f := range receipts {
 		safeRemoveReceipt(h.receiptsDir, f)
 	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "delete", "task", id, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -423,8 +427,8 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 
 	userID := currentUser(r).UserID
 
-	if found {
-		// Remove DB record first; delete file only after DB confirms success.
+	if found && !existing.Skipped {
+		// Was completed → uncomplete.
 		receiptFile := existing.ReceiptFile
 		if err := h.db.RemoveCompletion(req.TaskID, req.Month); err != nil {
 			writeServerError(w, "failed to remove completion", err)
@@ -433,13 +437,25 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		safeRemoveReceipt(h.receiptsDir, receiptFile)
 		writeJSON(w, map[string]bool{"completed": false})
 		go FireWebhooks(h.db, userID, "task.uncompleted", task.ID, task.Title, req.Month)
+		go h.db.InsertAuditLog(userID, "uncomplete", "completion", task.ID, task.Title)
+	} else if found && existing.Skipped {
+		// Was skipped → mark as completed.
+		if _, err := h.db.CompleteSkipped(req.TaskID, req.Month); err != nil {
+			writeServerError(w, "failed to complete task", err)
+			return
+		}
+		writeJSON(w, map[string]bool{"completed": true})
+		go FireWebhooks(h.db, userID, "task.completed", task.ID, task.Title, req.Month)
+		go h.db.InsertAuditLog(userID, "complete", "completion", task.ID, task.Title)
 	} else {
+		// Pending → complete.
 		if _, err := h.db.AddCompletion(req.TaskID, req.Month); err != nil {
 			writeServerError(w, "failed to add completion", err)
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
 		go FireWebhooks(h.db, userID, "task.completed", task.ID, task.Title, req.Month)
+		go h.db.InsertAuditLog(userID, "complete", "completion", task.ID, task.Title)
 	}
 }
 
@@ -478,6 +494,10 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		writeError(w, "task not marked as done for this month", http.StatusBadRequest)
+		return
+	}
+	if existing.Skipped {
+		writeError(w, "task is marked as skipped for this month", http.StatusBadRequest)
 		return
 	}
 	completion := existing
@@ -533,6 +553,10 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 	}
 	if !found {
 		writeError(w, "task not marked as done for this month", http.StatusBadRequest)
+		return
+	}
+	if existing.Skipped {
+		writeError(w, "task is marked as skipped for this month", http.StatusBadRequest)
 		return
 	}
 
@@ -640,6 +664,67 @@ func (h *Handler) DeleteCompletionReceipt(w http.ResponseWriter, r *http.Request
 	writeJSON(w, completion)
 }
 
+func (h *Handler) SkipCompletion(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TaskID int64  `json:"task_id"`
+		Month  string `json:"month"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.TaskID == 0 || req.Month == "" {
+		writeError(w, "task_id and month are required", http.StatusBadRequest)
+		return
+	}
+	if !isValidYearMonth(req.Month) {
+		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
+		return
+	}
+	task, ok := h.taskOwnerCheck(w, req.TaskID, currentUser(r).UserID)
+	if !ok {
+		return
+	}
+
+	userID := currentUser(r).UserID
+	completion, nowSkipped, err := h.db.SkipCompletion(req.TaskID, req.Month)
+	if err != nil {
+		if err.Error() == "task is already completed" {
+			writeError(w, "task is already completed, unmark it first", http.StatusBadRequest)
+			return
+		}
+		writeServerError(w, "failed to toggle skip", err)
+		return
+	}
+	if nowSkipped {
+		writeJSON(w, map[string]any{"skipped": true, "completion": completion})
+		go h.db.InsertAuditLog(userID, "skip", "completion", task.ID, task.Title)
+	} else {
+		writeJSON(w, map[string]any{"skipped": false})
+		go h.db.InsertAuditLog(userID, "unskip", "completion", task.ID, task.Title)
+	}
+}
+
+func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	limit, offset := 50, 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	logs, total, err := h.db.GetAuditLogs(limit, offset)
+	if err != nil {
+		writeServerError(w, "failed to list audit logs", err)
+		return
+	}
+	writeJSON(w, map[string]any{"logs": logs, "total": total})
+}
+
 func (h *Handler) ServeReceipt(w http.ResponseWriter, r *http.Request) {
 	filename := chi.URLParam(r, "filename")
 	if !isValidReceiptFilename(filename) {
@@ -703,13 +788,13 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="montly-export-`+from+`-`+to+`.csv"`)
 
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"Title", "Type", "Month", "Amount", "Has Receipt"})
+	_ = cw.Write([]string{"Title", "Type", "Month", "Status", "Amount", "Has Receipt"})
 	for _, row := range rows {
 		hasReceipt := "no"
 		if row.HasReceipt {
 			hasReceipt = "yes"
 		}
-		_ = cw.Write([]string{row.Title, row.Type, row.Month, row.Amount, hasReceipt})
+		_ = cw.Write([]string{row.Title, row.Type, row.Month, row.Status, row.Amount, hasReceipt})
 	}
 	cw.Flush()
 	if err := cw.Error(); err != nil {

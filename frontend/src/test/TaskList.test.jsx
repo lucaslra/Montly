@@ -13,6 +13,7 @@ function renderList(tasks, completionMap = new Map(), overrides = {}) {
     currency: '$',
     uploadingTaskId: null,
     onToggle: vi.fn(),
+    onSkip: vi.fn(),
     onUploadReceipt: vi.fn(),
     onRemoveReceipt: vi.fn(),
     onUpdateCompletion: vi.fn(),
@@ -61,7 +62,7 @@ describe('TaskList', () => {
 
     it('does not show checkbox checkmark when incomplete', () => {
       renderList([TASK])
-      const item = screen.getByRole('button', { name: /Rent/ })
+      const item = screen.getByRole('button', { name: /Mark.*Rent/ })
       expect(item).toHaveAttribute('aria-pressed', 'false')
     })
 
@@ -75,13 +76,13 @@ describe('TaskList', () => {
   describe('toggle', () => {
     it('calls onToggle when incomplete task clicked', async () => {
       const props = renderList([TASK])
-      await userEvent.click(screen.getByRole('button', { name: /Rent/ }))
+      await userEvent.click(screen.getByRole('button', { name: /Mark.*Rent/ }))
       expect(props.onToggle).toHaveBeenCalledWith(1)
     })
 
     it('calls onToggle when incomplete task activated with Enter', async () => {
       const props = renderList([TASK])
-      screen.getByRole('button', { name: /Rent/ }).focus()
+      screen.getByRole('button', { name: /Mark.*Rent/ }).focus()
       await userEvent.keyboard('{Enter}')
       expect(props.onToggle).toHaveBeenCalledWith(1)
     })

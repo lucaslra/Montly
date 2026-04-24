@@ -67,6 +67,13 @@ export const toggleCompletion = (taskId, month) =>
     body: JSON.stringify({ task_id: taskId, month }),
   })
 
+export const skipCompletion = (taskId, month) =>
+  request('/completions/skip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task_id: taskId, month }),
+  })
+
 export const patchCompletion = (taskId, month, fields) =>
   request(`/completions/${taskId}/${month}`, {
     method: 'PATCH',
@@ -125,6 +132,9 @@ export const createWebhook = (url, events, secret) =>
   })
 export const deleteWebhook = (id) =>
   request(`/webhooks/${id}`, { method: 'DELETE' })
+
+export const fetchAuditLogs = (limit = 50, offset = 0) =>
+  request(`/audit-logs?limit=${limit}&offset=${offset}`)
 
 export function exportCompletionsCSV(from, to) {
   const params = new URLSearchParams()

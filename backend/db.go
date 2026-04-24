@@ -66,6 +66,18 @@ type Completion struct {
 	ReceiptFile string `json:"receipt_file"`
 	Amount      string `json:"amount"` // overrides task's default amount when non-empty
 	Note        string `json:"note"`
+	Skipped     bool   `json:"skipped"`
+}
+
+type AuditLog struct {
+	ID          int64  `json:"id"`
+	UserID      int64  `json:"user_id"`
+	Username    string `json:"username"`
+	Action      string `json:"action"`
+	EntityType  string `json:"entity_type"`
+	EntityID    int64  `json:"entity_id"`
+	EntityLabel string `json:"entity_label"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type User struct {
@@ -108,9 +120,17 @@ func initDB(dsn, driver string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	if driver == "postgres" {
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(5)
+		db.SetConnMaxLifetime(5 * time.Minute)
+	} else {
+		// SQLite: serialize all access through a single connection.
+		// Multiple connections to the same :memory: database each get their own isolated DB.
+		// For file-based SQLite, serialization avoids "database is locked" errors under
+		// concurrent goroutines (e.g. audit log writes, token updates).
+		db.SetMaxOpenConns(1)
+	}
 
 	var migrateErr error
 	if driver == "postgres" {
@@ -156,7 +176,18 @@ func migratePostgres(db *sql.DB) error {
 			note         TEXT    NOT NULL DEFAULT '',
 			PRIMARY KEY (task_id, month)
 		)`,
-		`ALTER TABLE completions ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN IF NOT EXISTS note    TEXT    NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN IF NOT EXISTS skipped INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id           BIGSERIAL PRIMARY KEY,
+			user_id      BIGINT  NOT NULL,
+			action       TEXT    NOT NULL,
+			entity_type  TEXT    NOT NULL DEFAULT '',
+			entity_id    BIGINT  NOT NULL DEFAULT 0,
+			entity_label TEXT    NOT NULL DEFAULT '',
+			created_at   TEXT    NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			key     TEXT   NOT NULL,
@@ -218,6 +249,7 @@ func migrate(db *sql.DB) error {
 			receipt_file TEXT    NOT NULL DEFAULT '',
 			amount       TEXT    NOT NULL DEFAULT '',
 			note         TEXT    NOT NULL DEFAULT '',
+			skipped      INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (task_id, month)
 		);
 		CREATE TABLE IF NOT EXISTS settings (
@@ -254,9 +286,10 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE tasks ADD COLUMN end_date    TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN user_id     INTEGER REFERENCES users(id)`,
 		`ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`,
-		`ALTER TABLE completions ADD COLUMN receipt_file TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE completions ADD COLUMN amount       TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE completions ADD COLUMN note         TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN receipt_file TEXT    NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN amount       TEXT    NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN note         TEXT    NOT NULL DEFAULT ''`,
+		`ALTER TABLE completions ADD COLUMN skipped      INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			msg := err.Error()
@@ -329,11 +362,12 @@ func migrate(db *sql.DB) error {
 			receipt_file TEXT    NOT NULL DEFAULT '',
 			amount       TEXT    NOT NULL DEFAULT '',
 			note         TEXT    NOT NULL DEFAULT '',
+			skipped      INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (task_id, month)
 		)`); err != nil {
 			return fmt.Errorf("create completions: %w", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO completions SELECT task_id, month, completed_at, receipt_file, amount, '' FROM completions_old`); err != nil {
+		if _, err := tx.Exec(`INSERT INTO completions SELECT task_id, month, completed_at, receipt_file, amount, '', 0 FROM completions_old`); err != nil {
 			return fmt.Errorf("migrate completions data: %w", err)
 		}
 		if _, err := tx.Exec(`DROP TABLE completions_old`); err != nil {
@@ -348,6 +382,16 @@ func migrate(db *sql.DB) error {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS audit_logs (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id      INTEGER NOT NULL,
+		action       TEXT    NOT NULL,
+		entity_type  TEXT    NOT NULL DEFAULT '',
+		entity_id    INTEGER NOT NULL DEFAULT 0,
+		entity_label TEXT    NOT NULL DEFAULT '',
+		created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+	)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`)
 
 	return nil
 }
@@ -674,21 +718,23 @@ func (db *DB) DeleteTask(id int64) error {
 
 // ======== Completions ========
 
-const completionColumns = `task_id, month, completed_at, receipt_file, amount, note`
+const completionColumns = `task_id, month, completed_at, receipt_file, amount, note, skipped`
 
 func scanCompletion(row *sql.Row) (Completion, bool, error) {
 	var c Completion
-	err := row.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount, &c.Note)
+	var skipped int
+	err := row.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount, &c.Note, &skipped)
 	if err == sql.ErrNoRows {
 		return Completion{}, false, nil
 	}
+	c.Skipped = skipped != 0
 	return c, err == nil, err
 }
 
 // GetCompletions returns completions for a given month that belong to the user (via task ownership).
 func (db *DB) GetCompletions(month string, userID int64) ([]Completion, error) {
 	rows, err := db.Query(
-		db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note
+		db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note, c.skipped
 		 FROM completions c
 		 JOIN tasks t ON t.id = c.task_id
 		 WHERE c.month = ? AND t.user_id = ?`),
@@ -701,9 +747,11 @@ func (db *DB) GetCompletions(month string, userID int64) ([]Completion, error) {
 	completions := []Completion{}
 	for rows.Next() {
 		var c Completion
-		if err := rows.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount, &c.Note); err != nil {
+		var skipped int
+		if err := rows.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount, &c.Note, &skipped); err != nil {
 			return nil, err
 		}
+		c.Skipped = skipped != 0
 		completions = append(completions, c)
 	}
 	return completions, rows.Err()
@@ -727,6 +775,44 @@ func (db *DB) AddCompletion(taskID int64, month string) (Completion, error) {
 func (db *DB) RemoveCompletion(taskID int64, month string) error {
 	_, err := db.Exec(db.q(`DELETE FROM completions WHERE task_id = ? AND month = ?`), taskID, month)
 	return err
+}
+
+// SkipCompletion toggles the skip state for the given task+month.
+// - No row → inserts a skipped row; returns (completion, true, nil).
+// - Row with skipped=1 → removes the row (back to pending); returns (Completion{}, false, nil).
+// - Row with skipped=0 → returns an error (task is completed, not pending).
+func (db *DB) SkipCompletion(taskID int64, month string) (Completion, bool, error) {
+	existing, found, err := db.GetCompletion(taskID, month)
+	if err != nil {
+		return Completion{}, false, err
+	}
+	if found && !existing.Skipped {
+		return Completion{}, false, fmt.Errorf("task is already completed")
+	}
+	if found && existing.Skipped {
+		if _, err := db.Exec(db.q(`DELETE FROM completions WHERE task_id = ? AND month = ?`), taskID, month); err != nil {
+			return Completion{}, false, err
+		}
+		return Completion{}, false, nil
+	}
+	if _, err := db.Exec(db.q(`INSERT INTO completions (task_id, month, skipped) VALUES (?, ?, 1)`), taskID, month); err != nil {
+		return Completion{}, false, err
+	}
+	c, _, err := db.GetCompletion(taskID, month)
+	return c, true, err
+}
+
+// CompleteSkipped updates a skipped completion to mark it as completed (skipped=0).
+func (db *DB) CompleteSkipped(taskID int64, month string) (Completion, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(
+		db.q(`UPDATE completions SET skipped = 0, completed_at = ? WHERE task_id = ? AND month = ?`),
+		now, taskID, month,
+	); err != nil {
+		return Completion{}, err
+	}
+	c, _, err := db.GetCompletion(taskID, month)
+	return c, err
 }
 
 func (db *DB) SetCompletionReceipt(taskID int64, month, filename string) (Completion, error) {
@@ -780,12 +866,13 @@ type ExportRow struct {
 	Month      string
 	Amount     string
 	HasReceipt bool
+	Status     string // "completed" or "skipped"
 }
 
 // GetCompletionsForExport returns all completions in the [from, to] month range for the user.
 func (db *DB) GetCompletionsForExport(userID int64, from, to string) ([]ExportRow, error) {
 	rows, err := db.Query(
-		db.q(`SELECT t.title, t.type, c.month, c.amount, c.receipt_file
+		db.q(`SELECT t.title, t.type, c.month, c.amount, c.receipt_file, c.skipped
 		 FROM completions c
 		 JOIN tasks t ON t.id = c.task_id
 		 WHERE t.user_id = ? AND c.month >= ? AND c.month <= ?
@@ -800,10 +887,16 @@ func (db *DB) GetCompletionsForExport(userID int64, from, to string) ([]ExportRo
 	for rows.Next() {
 		var row ExportRow
 		var receiptFile string
-		if err := rows.Scan(&row.Title, &row.Type, &row.Month, &row.Amount, &receiptFile); err != nil {
+		var skipped int
+		if err := rows.Scan(&row.Title, &row.Type, &row.Month, &row.Amount, &receiptFile, &skipped); err != nil {
 			return nil, err
 		}
 		row.HasReceipt = receiptFile != ""
+		if skipped != 0 {
+			row.Status = "skipped"
+		} else {
+			row.Status = "completed"
+		}
 		result = append(result, row)
 	}
 	return result, rows.Err()
@@ -1099,4 +1192,49 @@ func (db *DB) DeleteWebhook(id, userID int64) error {
 // GetWebhooksForUser returns all webhooks for firing — includes secret.
 func (db *DB) GetWebhooksForUser(userID int64) ([]Webhook, error) {
 	return db.ListWebhooks(userID)
+}
+
+// ======== Audit Log ========
+
+// InsertAuditLog records an action. Intended to be called in a goroutine (best-effort).
+func (db *DB) InsertAuditLog(userID int64, action, entityType string, entityID int64, entityLabel string) {
+	_, err := db.Exec(
+		db.q(`INSERT INTO audit_logs (user_id, action, entity_type, entity_id, entity_label) VALUES (?, ?, ?, ?, ?)`),
+		userID, action, entityType, entityID, entityLabel,
+	)
+	if err != nil {
+		log.Printf("InsertAuditLog: %v", err)
+	}
+}
+
+// GetAuditLogs returns audit log entries, newest first.
+func (db *DB) GetAuditLogs(limit, offset int) ([]AuditLog, int, error) {
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := db.Query(
+		db.q(`SELECT al.id, al.user_id, COALESCE(u.username, 'deleted'), al.action, al.entity_type, al.entity_id, al.entity_label, al.created_at
+		 FROM audit_logs al
+		 LEFT JOIN users u ON u.id = al.user_id
+		 ORDER BY al.created_at DESC
+		 LIMIT ? OFFSET ?`),
+		limit, offset,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var logs []AuditLog
+	for rows.Next() {
+		var l AuditLog
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Username, &l.Action, &l.EntityType, &l.EntityID, &l.EntityLabel, &l.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		logs = append(logs, l)
+	}
+	if logs == nil {
+		logs = []AuditLog{}
+	}
+	return logs, total, rows.Err()
 }

@@ -188,12 +188,13 @@ func main() {
 			r.Delete("/webhooks/{id}", wh.DeleteWebhook)
 			mountAPI(r, h)
 
-			// Admin-only user management
+			// Admin-only
 			r.Group(func(r chi.Router) {
 				r.Use(requireAdmin)
 				r.Get("/users", uh.ListUsers)
 				r.Post("/users", uh.CreateUser)
 				r.Delete("/users/{id}", uh.DeleteUser)
+				r.Get("/audit-logs", h.ListAuditLogs)
 			})
 		})
 	}
@@ -226,6 +227,7 @@ func mountAPI(r chi.Router, h *Handler) {
 	r.Get("/receipts/{filename}", h.ServeReceipt)
 	r.Get("/completions", h.ListCompletions)
 	r.Post("/completions/toggle", h.ToggleCompletion)
+	r.Post("/completions/skip", h.SkipCompletion)
 	r.Patch("/completions/{task_id}/{month}", h.PatchCompletion)
 	r.Post("/completions/{task_id}/{month}/receipt", h.UploadCompletionReceipt)
 	r.Delete("/completions/{task_id}/{month}/receipt", h.DeleteCompletionReceipt)

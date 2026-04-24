@@ -9,7 +9,7 @@ import { MonthPicker } from './components/TaskForm.jsx'
 import {
   fetchSettings, updateSettings,
   fetchTasks, fetchCompletions,
-  toggleCompletion, createTask, updateTask, deleteTask,
+  toggleCompletion, skipCompletion, createTask, updateTask, deleteTask,
   uploadCompletionReceipt, deleteCompletionReceipt, patchCompletion,
   fetchMe, logout, fetchSetupStatus,
 } from './api.js'
@@ -186,33 +186,70 @@ export default function App() {
   }, [])
 
   const handleToggle = useCallback(async (taskId) => {
-    // Read current state via ref so this callback stays stable across completion changes.
-    const wasCompleted = completionMapRef.current.has(taskId)
-    const prevEntry    = completionMapRef.current.get(taskId)
-    // Optimistic update: flip completion state immediately for snappy UI.
+    const prevEntry   = completionMapRef.current.get(taskId)
+    const wasCompleted = prevEntry && !prevEntry.skipped
+    // Optimistic update.
     setCompletionMap(prev => {
       const next = new Map(prev)
-      if (wasCompleted) { next.delete(taskId) }
-      else { next.set(taskId, { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '', note: '' }) }
+      if (wasCompleted) {
+        next.delete(taskId)
+      } else {
+        // pending or skipped → completed
+        const base = prevEntry ? { ...prevEntry, skipped: false } : { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '', note: '', skipped: false }
+        next.set(taskId, base)
+      }
       return next
     })
     try {
       const { completed } = await toggleCompletion(taskId, month)
-      // Sync with definitive server state (covers edge cases like concurrent edits).
       setCompletionMap(prev => {
         const next = new Map(prev)
         if (completed) {
-          next.set(taskId, prev.get(taskId) ?? { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '', note: '' })
+          next.set(taskId, prev.get(taskId) ?? { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '', note: '', skipped: false })
         } else {
           next.delete(taskId)
         }
         return next
       })
     } catch (e) {
-      // Revert to pre-toggle state on failure.
       setCompletionMap(prev => {
         const next = new Map(prev)
-        if (wasCompleted && prevEntry) { next.set(taskId, prevEntry) }
+        if (prevEntry) { next.set(taskId, prevEntry) }
+        else { next.delete(taskId) }
+        return next
+      })
+      onApiError(e)
+    }
+  }, [month, onApiError])
+
+  const handleSkip = useCallback(async (taskId) => {
+    const prevEntry = completionMapRef.current.get(taskId)
+    const wasSkipped = prevEntry?.skipped === true
+    // Optimistic update.
+    setCompletionMap(prev => {
+      const next = new Map(prev)
+      if (wasSkipped) {
+        next.delete(taskId)
+      } else {
+        next.set(taskId, { task_id: taskId, month, completed_at: '', receipt_file: '', amount: '', note: '', skipped: true })
+      }
+      return next
+    })
+    try {
+      const result = await skipCompletion(taskId, month)
+      setCompletionMap(prev => {
+        const next = new Map(prev)
+        if (result.skipped) {
+          next.set(taskId, result.completion)
+        } else {
+          next.delete(taskId)
+        }
+        return next
+      })
+    } catch (e) {
+      setCompletionMap(prev => {
+        const next = new Map(prev)
+        if (prevEntry) { next.set(taskId, prevEntry) }
         else { next.delete(taskId) }
         return next
       })
@@ -294,7 +331,7 @@ export default function App() {
   }
 
   const { done, total, pct } = useMemo(() => {
-    const d = tasks.filter(t => completionMap.has(t.id)).length
+    const d = tasks.filter(t => { const c = completionMap.get(t.id); return c && !c.skipped }).length
     const t = tasks.length
     return { done: d, total: t, pct: t ? (d / t) * 100 : 0 }
   }, [tasks, completionMap])
@@ -305,7 +342,7 @@ export default function App() {
     const due = monetaryTasks.reduce((sum, t) =>
       sum + (parseFloat(t.metadata?.amount ?? '') || 0), 0)
     const paid = monetaryTasks
-      .filter(t => completionMap.has(t.id))
+      .filter(t => { const c = completionMap.get(t.id); return c && !c.skipped })
       .reduce((sum, t) => {
         const c = completionMap.get(t.id)
         return sum + (parseFloat(c?.amount || t.metadata?.amount || '') || 0)
@@ -471,6 +508,7 @@ export default function App() {
               currency={settings.currency}
               uploadingTaskId={uploadingTaskId}
               onToggle={handleToggle}
+              onSkip={handleSkip}
               onUploadReceipt={handleUploadReceipt}
               onRemoveReceipt={handleRemoveReceipt}
               onUpdateCompletion={handleUpdateCompletion}

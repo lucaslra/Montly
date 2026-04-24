@@ -2,7 +2,7 @@ import { memo, useRef, useState } from 'react'
 
 const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.gif'
 
-const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', uploadingTaskId, onToggle, onUploadReceipt, onRemoveReceipt, onUpdateCompletion, onGoToManage }) {
+const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', uploadingTaskId, onToggle, onSkip, onUploadReceipt, onRemoveReceipt, onUpdateCompletion, onGoToManage }) {
   const [confirmUndo, setConfirmUndo] = useState(null)
 
   if (tasks.length === 0) {
@@ -20,18 +20,19 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
     <ul className="task-list">
       {tasks.map(task => {
         const completion = completionMap.get(task.id)
-        const done = Boolean(completion)
+        const done = Boolean(completion) && !completion?.skipped
+        const isSkipped = completion?.skipped === true
         const showConfirm = confirmUndo === task.id
 
         return (
           <li
             key={task.id}
-            className={`task-item${done ? ' completed' : ''}`}
+            className={`task-item${done ? ' completed' : ''}${isSkipped ? ' skipped' : ''}`}
           >
             <button
               className="task-toggle-btn"
               aria-pressed={done}
-              aria-label={`${done ? 'Unmark' : 'Mark'} "${task.title}"`}
+              aria-label={done ? `Unmark "${task.title}"` : `Mark "${task.title}" as done`}
               onClick={() => {
                 if (showConfirm) { setConfirmUndo(null); return }
                 if (done && completion?.receipt_file) {
@@ -41,15 +42,34 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
                 }
               }}
             >
-              <span className="task-checkbox" aria-hidden="true">{done ? '✓' : ''}</span>
+              <span className="task-checkbox" aria-hidden="true">
+                {done ? '✓' : (isSkipped ? '—' : '')}
+              </span>
             </button>
             <div className="task-content">
               <div className="task-title-row">
                 <span className="task-title">{task.title}</span>
                 {task.type && <span className={`type-badge type-${task.type}`}>{task.type}</span>}
+                {isSkipped ? (
+                  <button
+                    className="task-skip-btn task-skip-btn--active"
+                    onClick={() => onSkip(task.id)}
+                    aria-label={`Un-skip "${task.title}" for this month`}
+                  >
+                    un-skip
+                  </button>
+                ) : !done ? (
+                  <button
+                    className="task-skip-btn"
+                    onClick={() => onSkip(task.id)}
+                    aria-label={`Skip "${task.title}" for this month`}
+                  >
+                    skip
+                  </button>
+                ) : null}
               </div>
               {task.description && <span className="task-desc">{task.description}</span>}
-              {['payment', 'subscription', 'bill'].includes(task.type) && (
+              {['payment', 'subscription', 'bill'].includes(task.type) && !isSkipped && (
                 <PaymentSlot
                   taskId={task.id}
                   taskType={task.type}

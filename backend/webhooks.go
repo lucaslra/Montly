@@ -23,6 +23,7 @@ import (
 var allowedWebhookEvents = map[string]bool{
 	"task.completed":   true,
 	"task.uncompleted": true,
+	"task.skipped":     true,
 }
 
 // WebhookHandler handles CRUD for webhooks.
@@ -97,7 +98,7 @@ func (h *WebhookHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, ev := range req.Events {
 		if !allowedWebhookEvents[ev] {
-			writeError(w, fmt.Sprintf("unknown event %q; allowed: task.completed, task.uncompleted", ev), http.StatusBadRequest)
+			writeError(w, fmt.Sprintf("unknown event %q; allowed: task.completed, task.uncompleted, task.skipped", ev), http.StatusBadRequest)
 			return
 		}
 	}
@@ -108,11 +109,13 @@ func (h *WebhookHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hook, err := h.db.CreateWebhook(currentUser(r).UserID, req.URL, eventsStr, req.Secret)
+	userID := currentUser(r).UserID
+	hook, err := h.db.CreateWebhook(userID, req.URL, eventsStr, req.Secret)
 	if err != nil {
 		writeServerError(w, "failed to create webhook", err)
 		return
 	}
+	go h.db.InsertAuditLog(userID, "create_webhook", "webhook", hook.ID, hook.URL)
 	writeJSONCreated(w, toWebhookResponse(hook))
 }
 
@@ -129,6 +132,7 @@ func (h *WebhookHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to delete webhook", err)
 		return
 	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "delete_webhook", "webhook", id, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 

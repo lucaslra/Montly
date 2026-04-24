@@ -140,7 +140,7 @@ describe('App optimistic toggle', () => {
     api.toggleCompletion.mockReturnValue(new Promise(r => { resolveToggle = r }))
     await renderAuth([task], [])
 
-    const taskBtn = screen.getByRole('button', { name: /Netflix/i })
+    const taskBtn = screen.getByRole('button', { name: /Mark.*Netflix/i })
     expect(taskBtn).toHaveAttribute('aria-pressed', 'false')
     await userEvent.click(taskBtn)
     // Optimistic update: flipped before the server responds
@@ -154,7 +154,7 @@ describe('App optimistic toggle', () => {
     api.toggleCompletion.mockRejectedValue(Object.assign(new Error('server error'), { status: 500 }))
     await renderAuth([task], [])
 
-    const taskBtn = screen.getByRole('button', { name: /Netflix/i })
+    const taskBtn = screen.getByRole('button', { name: /Mark.*Netflix/i })
     await userEvent.click(taskBtn)
     await waitFor(() => expect(taskBtn).toHaveAttribute('aria-pressed', 'false'))
   })

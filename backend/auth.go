@@ -399,6 +399,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to update password", err)
 		return
 	}
+	go h.db.InsertAuditLog(user.ID, "change_password", "user", user.ID, user.Username)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -454,6 +455,7 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to create user", err)
 		return
 	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "create_user", "user", user.ID, user.Username)
 	writeJSONCreated(w, map[string]any{"id": user.ID, "username": user.Username, "is_admin": user.IsAdmin, "created_at": user.CreatedAt})
 }
 
@@ -492,6 +494,7 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to delete user", err)
 		return
 	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "delete_user", "user", id, target.Username)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -540,6 +543,7 @@ func (h *TokenHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go h.db.InsertAuditLog(currentUser(r).UserID, "create_token", "token", tok.ID, req.Name)
 	writeJSONCreated(w, map[string]any{
 		"token":     tok,
 		"plaintext": plaintext,
@@ -559,5 +563,6 @@ func (h *TokenHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to revoke token", err)
 		return
 	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "revoke_token", "token", id, "")
 	w.WriteHeader(http.StatusNoContent)
 }

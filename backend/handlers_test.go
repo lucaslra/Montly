@@ -802,7 +802,7 @@ func TestExportCSV(t *testing.T) {
 		if !strings.Contains(w.Header().Get("Content-Disposition"), "attachment") {
 			t.Error("expected Content-Disposition: attachment")
 		}
-		if !strings.Contains(w.Body.String(), "Title,Type,Month,Amount,Has Receipt") {
+		if !strings.Contains(w.Body.String(), "Title,Type,Month,Status,Amount,Has Receipt") {
 			t.Errorf("missing CSV header row; body: %s", w.Body.String())
 		}
 	})

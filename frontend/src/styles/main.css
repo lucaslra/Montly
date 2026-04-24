@@ -348,6 +348,84 @@ body {
   color: var(--muted);
 }
 
+/* ── Skipped task state ──────────────────────────── */
+.task-item.skipped .task-checkbox {
+  background: none;
+  border-color: var(--border);
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1;
+}
+.task-item.skipped .task-title {
+  text-decoration: line-through;
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.task-skip-btn {
+  font-size: 0.6875rem;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
+  margin-left: auto;
+}
+@media (hover: hover) {
+  .task-skip-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+}
+.task-skip-btn--active {
+  border-style: dashed;
+  color: var(--muted);
+}
+@media (hover: hover) {
+  .task-skip-btn--active:hover {
+    border-color: var(--text);
+    color: var(--text);
+  }
+}
+
+/* ── Audit log ───────────────────────────────────── */
+.audit-log-scroll {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+.audit-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.audit-log-table th,
+.audit-log-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.audit-log-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.audit-log-time { color: var(--muted); }
+.audit-log-label { color: var(--muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.audit-log-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
 /* ── Manage view ─────────────────────────────────── */
 .manage-view {
   display: flex;
