@@ -802,3 +802,158 @@ func TestWebhookCRUD(t *testing.T) {
 		t.Errorf("after delete: expected 0 hooks, got %d", len(hooks))
 	}
 }
+
+// ── ImportCompletionsCSV ──────────────────────────────────────────────────────
+
+func TestImportCompletionsCSV(t *testing.T) {
+	mustUser := func(t *testing.T, db *DB, name string) User {
+		t.Helper()
+		hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+		u, err := db.CreateUser(name, string(hash), false)
+		if err != nil {
+			t.Fatalf("createUser %s: %v", name, err)
+		}
+		return u
+	}
+	mustTask := func(t *testing.T, db *DB, title string, userID int64) Task {
+		t.Helper()
+		task, err := db.CreateTask(title, "", "payment", "", "", json.RawMessage(`{}`), userID, 1)
+		if err != nil {
+			t.Fatalf("createTask %s: %v", title, err)
+		}
+		return task
+	}
+
+	t.Run("creates task and completion when no match exists", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := mustUser(t, db, "alice")
+		rows := []ImportRow{{Title: "New Sub", Type: "subscription", Month: "2026-03", Status: "completed", Amount: "9.99"}}
+		result, err := db.ImportCompletionsCSV(alice.ID, rows)
+		if err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		if result.TasksCreated != 1 {
+			t.Errorf("tasks_created: got %d, want 1", result.TasksCreated)
+		}
+		if result.CompletionsCreated != 1 {
+			t.Errorf("completions_created: got %d, want 1", result.CompletionsCreated)
+		}
+		if result.CompletionsUpdated != 0 {
+			t.Errorf("completions_updated: got %d, want 0", result.CompletionsUpdated)
+		}
+	})
+
+	t.Run("matches existing task by title and type", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := mustUser(t, db, "alice")
+		task := mustTask(t, db, "Rent", alice.ID)
+		rows := []ImportRow{{Title: "Rent", Type: "payment", Month: "2026-04", Status: "completed", Amount: "750"}}
+		result, err := db.ImportCompletionsCSV(alice.ID, rows)
+		if err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		if result.TasksCreated != 0 {
+			t.Errorf("should not create a new task; got tasks_created=%d", result.TasksCreated)
+		}
+		c, found, _ := db.GetCompletion(task.ID, "2026-04")
+		if !found {
+			t.Fatal("completion not found after import")
+		}
+		if c.Amount != "750" {
+			t.Errorf("amount: got %q, want %q", c.Amount, "750")
+		}
+	})
+
+	t.Run("updates existing completion without touching receipt or note", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := mustUser(t, db, "alice")
+		task := mustTask(t, db, "Gym", alice.ID)
+		// pre-existing completion with a note and receipt stub
+		db.Exec(db.q(`INSERT INTO completions (task_id, month, amount, note, receipt_file) VALUES (?, ?, ?, ?, ?)`),
+			task.ID, "2026-02", "30", "see receipt", "stub-uuid.pdf")
+		rows := []ImportRow{{Title: "Gym", Type: "payment", Month: "2026-02", Status: "completed", Amount: "35"}}
+		result, err := db.ImportCompletionsCSV(alice.ID, rows)
+		if err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		if result.CompletionsUpdated != 1 {
+			t.Errorf("completions_updated: got %d, want 1", result.CompletionsUpdated)
+		}
+		c, _, _ := db.GetCompletion(task.ID, "2026-02")
+		if c.Amount != "35" {
+			t.Errorf("amount not updated: got %q", c.Amount)
+		}
+		if c.Note != "see receipt" {
+			t.Errorf("note was cleared: got %q", c.Note)
+		}
+		if c.ReceiptFile != "stub-uuid.pdf" {
+			t.Errorf("receipt_file was cleared: got %q", c.ReceiptFile)
+		}
+	})
+
+	t.Run("skipped status sets skipped=1", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := mustUser(t, db, "alice")
+		rows := []ImportRow{{Title: "Optional", Type: "reminder", Month: "2026-05", Status: "skipped", Amount: ""}}
+		if _, err := db.ImportCompletionsCSV(alice.ID, rows); err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		var skipped int
+		tasks, _ := db.GetTasks("2026-05", alice.ID)
+		db.QueryRow(db.q(`SELECT skipped FROM completions WHERE task_id = ? AND month = ?`), tasks[0].ID, "2026-05").Scan(&skipped)
+		if skipped != 1 {
+			t.Errorf("skipped: got %d, want 1", skipped)
+		}
+	})
+
+	t.Run("same title different type creates two tasks", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := mustUser(t, db, "alice")
+		rows := []ImportRow{
+			{Title: "Netflix", Type: "subscription", Month: "2026-01", Status: "completed", Amount: "11"},
+			{Title: "Netflix", Type: "payment", Month: "2026-01", Status: "completed", Amount: "5"},
+		}
+		result, err := db.ImportCompletionsCSV(alice.ID, rows)
+		if err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		if result.TasksCreated != 2 {
+			t.Errorf("tasks_created: got %d, want 2", result.TasksCreated)
+		}
+	})
+
+	t.Run("deduplicates tasks across rows for same title+type", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := mustUser(t, db, "alice")
+		rows := []ImportRow{
+			{Title: "Spotify", Type: "subscription", Month: "2026-01", Status: "completed", Amount: "10"},
+			{Title: "Spotify", Type: "subscription", Month: "2026-02", Status: "completed", Amount: "10"},
+		}
+		result, err := db.ImportCompletionsCSV(alice.ID, rows)
+		if err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		if result.TasksCreated != 1 {
+			t.Errorf("tasks_created: got %d, want 1 (only on first occurrence)", result.TasksCreated)
+		}
+		if result.CompletionsCreated != 2 {
+			t.Errorf("completions_created: got %d, want 2", result.CompletionsCreated)
+		}
+	})
+
+	t.Run("isolates imports between users", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := mustUser(t, db, "alice")
+		bob := mustUser(t, db, "bob")
+		mustTask(t, db, "Shared Title", alice.ID)
+		rows := []ImportRow{{Title: "Shared Title", Type: "payment", Month: "2026-06", Status: "completed", Amount: "1"}}
+		result, err := db.ImportCompletionsCSV(bob.ID, rows)
+		if err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		// bob doesn't own alice's task → should create a new task for bob
+		if result.TasksCreated != 1 {
+			t.Errorf("tasks_created: got %d, want 1 (bob gets own task)", result.TasksCreated)
+		}
+	})
+}

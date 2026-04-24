@@ -884,6 +884,146 @@ func TestExportCSV(t *testing.T) {
 	})
 }
 
+// ── ImportCSV ─────────────────────────────────────────────────────────────────
+
+// buildCSVUpload creates a multipart/form-data request with the given CSV body
+// attached as the "file" field.
+func buildCSVUpload(t *testing.T, method, path string, csvBody string) *http.Request {
+	t.Helper()
+	var buf strings.Builder
+	boundary := "testboundary12345"
+	buf.WriteString("--" + boundary + "\r\n")
+	buf.WriteString(`Content-Disposition: form-data; name="file"; filename="import.csv"` + "\r\n")
+	buf.WriteString("Content-Type: text/csv\r\n\r\n")
+	buf.WriteString(csvBody)
+	buf.WriteString("\r\n--" + boundary + "--\r\n")
+	req := httptest.NewRequest(method, path, strings.NewReader(buf.String()))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	return req
+}
+
+func addAuth(t *testing.T, ts *testServer, req *http.Request, userID int64, isAdmin bool) *http.Request {
+	t.Helper()
+	tok, err := newSession(sessionClaims{
+		UserID:  userID,
+		IsAdmin: isAdmin,
+		Expires: time.Now().Add(time.Hour).Unix(),
+	}, ts.secret)
+	if err != nil {
+		t.Fatalf("newSession: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+	return req
+}
+
+func TestImportCSV(t *testing.T) {
+	const validHeader = "Title,Type,Month,Status,Amount,Has Receipt\n"
+
+	t.Run("round-trip: export then import produces same completions", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task, _ := ts.db.CreateTask("Rent", "", "payment", "2020-01", "", nil, alice.ID, 1)
+		ts.db.AddCompletion(task.ID, "2026-03")
+		ts.db.SetCompletionAmount(task.ID, "2026-03", "800")
+
+		// Export
+		exportW := ts.do(ts.authReq(t, http.MethodGet, "/api/export/completions.csv?from=2026-03&to=2026-03", "", alice.ID, false))
+		assertStatus(t, exportW, http.StatusOK)
+
+		// Import into a fresh user (bob) to prove task creation + completion
+		bob := ts.mustUser(t, "bob", false)
+		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", exportW.Body.String()), bob.ID, false)
+		importW := ts.do(req)
+		assertStatus(t, importW, http.StatusOK)
+
+		var result ImportResult
+		json.NewDecoder(importW.Body).Decode(&result)
+		if result.TasksCreated != 1 {
+			t.Errorf("tasks_created: got %d, want 1", result.TasksCreated)
+		}
+		if result.CompletionsCreated != 1 {
+			t.Errorf("completions_created: got %d, want 1", result.CompletionsCreated)
+		}
+	})
+
+	t.Run("400 when file field is missing", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		req := ts.authReq(t, http.MethodPost, "/api/import/completions.csv", "", alice.ID, false)
+		req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+		req.Body = io.NopCloser(strings.NewReader("--x--\r\n"))
+		assertStatus(t, ts.do(req), http.StatusBadRequest)
+	})
+
+	t.Run("400 on wrong header columns", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bad := "A,B,C,D,E,F\nvalue,payment,2026-01,completed,,no\n"
+		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", bad), alice.ID, false)
+		assertStatus(t, ts.do(req), http.StatusBadRequest)
+	})
+
+	t.Run("400 on invalid month", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bad := validHeader + "Task,payment,not-a-month,completed,,no\n"
+		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", bad), alice.ID, false)
+		assertStatus(t, ts.do(req), http.StatusBadRequest)
+	})
+
+	t.Run("400 on invalid status", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bad := validHeader + "Task,payment,2026-01,pending,,no\n"
+		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", bad), alice.ID, false)
+		assertStatus(t, ts.do(req), http.StatusBadRequest)
+	})
+
+	t.Run("400 on unknown task type", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bad := validHeader + "Task,unknown,2026-01,completed,,no\n"
+		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", bad), alice.ID, false)
+		assertStatus(t, ts.do(req), http.StatusBadRequest)
+	})
+
+	t.Run("400 on empty file (no data rows)", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", validHeader), alice.ID, false)
+		assertStatus(t, ts.do(req), http.StatusBadRequest)
+	})
+
+	t.Run("upsert: re-import updates existing completion", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task, _ := ts.db.CreateTask("Phone", "", "payment", "2020-01", "", nil, alice.ID, 1)
+		ts.db.AddCompletion(task.ID, "2026-01")
+		ts.db.SetCompletionAmount(task.ID, "2026-01", "20")
+
+		csv := validHeader + "Phone,payment,2026-01,completed,25,no\n"
+		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", csv), alice.ID, false)
+		w := ts.do(req)
+		assertStatus(t, w, http.StatusOK)
+
+		var result ImportResult
+		json.NewDecoder(w.Body).Decode(&result)
+		if result.CompletionsUpdated != 1 {
+			t.Errorf("completions_updated: got %d, want 1", result.CompletionsUpdated)
+		}
+		c, _, _ := ts.db.GetCompletion(task.ID, "2026-01")
+		if c.Amount != "25" {
+			t.Errorf("amount after upsert: got %q, want %q", c.Amount, "25")
+		}
+	})
+
+	t.Run("401 when unauthenticated", func(t *testing.T) {
+		ts := newTestServer(t)
+		req := buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", validHeader+"Task,payment,2026-01,completed,,no\n")
+		assertStatus(t, ts.do(req), http.StatusUnauthorized)
+	})
+}
+
 // ── Validation helpers ────────────────────────────────────────────────────────
 
 func TestIsValidYearMonth(t *testing.T) {

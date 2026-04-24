@@ -839,3 +839,104 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ExportCSV flush: %v", err)
 	}
 }
+
+// ImportCSV accepts a multipart upload of a CSV file that matches the export
+// format (Title,Type,Month,Status,Amount,Has Receipt) and upserts completions.
+// The "Has Receipt" column is accepted but ignored — receipts cannot be
+// imported as binary attachments via CSV.
+//
+// All rows are validated before any DB writes; the entire import is atomic.
+// Returns {"tasks_created":N,"completions_created":N,"completions_updated":N}.
+func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
+	const maxBytes = 1 << 20 // 1 MB
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes+1024)
+	if err := r.ParseMultipartForm(maxBytes); err != nil {
+		writeError(w, "file too large (max 1 MB)", http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, "file field required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	cr := csv.NewReader(file)
+	headerRow, err := cr.Read()
+	if err != nil {
+		writeError(w, "could not read CSV header", http.StatusBadRequest)
+		return
+	}
+	expected := []string{"Title", "Type", "Month", "Status", "Amount", "Has Receipt"}
+	if len(headerRow) != len(expected) {
+		writeError(w, "unexpected CSV header: must match export format", http.StatusBadRequest)
+		return
+	}
+	for i, col := range expected {
+		if headerRow[i] != col {
+			writeError(w, "unexpected CSV header: column "+strconv.Itoa(i+1)+" must be "+col, http.StatusBadRequest)
+			return
+		}
+	}
+
+	validTypes := map[string]bool{
+		"payment":      true,
+		"subscription": true,
+		"bill":         true,
+		"reminder":     true,
+	}
+
+	var rows []ImportRow
+	lineNum := 1
+	for {
+		rec, err := cr.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		lineNum++
+		if err != nil {
+			writeError(w, "line "+strconv.Itoa(lineNum)+": parse error: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(rec) != 6 {
+			writeError(w, "line "+strconv.Itoa(lineNum)+": expected 6 columns", http.StatusBadRequest)
+			return
+		}
+		title, taskType, month, status, amount := rec[0], rec[1], rec[2], rec[3], rec[4]
+		if title == "" {
+			writeError(w, "line "+strconv.Itoa(lineNum)+": title must not be empty", http.StatusBadRequest)
+			return
+		}
+		if !validTypes[taskType] {
+			writeError(w, "line "+strconv.Itoa(lineNum)+": unknown task type "+taskType, http.StatusBadRequest)
+			return
+		}
+		if !isValidYearMonth(month) {
+			writeError(w, "line "+strconv.Itoa(lineNum)+": invalid month "+month, http.StatusBadRequest)
+			return
+		}
+		if status != "completed" && status != "skipped" {
+			writeError(w, "line "+strconv.Itoa(lineNum)+": status must be 'completed' or 'skipped'", http.StatusBadRequest)
+			return
+		}
+		rows = append(rows, ImportRow{
+			Title:  title,
+			Type:   taskType,
+			Month:  month,
+			Status: status,
+			Amount: amount,
+		})
+	}
+
+	if len(rows) == 0 {
+		writeError(w, "CSV contains no data rows", http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.db.ImportCompletionsCSV(currentUser(r).UserID, rows)
+	if err != nil {
+		writeServerError(w, "import failed", err)
+		return
+	}
+	writeJSON(w, result)
+}

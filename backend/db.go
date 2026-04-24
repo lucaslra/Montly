@@ -967,6 +967,117 @@ func (db *DB) GetCompletionsForExport(userID int64, from, to string) ([]ExportRo
 	return result, rows.Err()
 }
 
+// ======== CSV Import ========
+
+// ImportRow is one data row from the CSV import.
+type ImportRow struct {
+	Title  string
+	Type   string
+	Month  string
+	Status string // "completed" or "skipped"
+	Amount string
+}
+
+// ImportResult summarises what the import did.
+type ImportResult struct {
+	TasksCreated       int `json:"tasks_created"`
+	CompletionsCreated int `json:"completions_created"`
+	CompletionsUpdated int `json:"completions_updated"`
+}
+
+// ImportCompletionsCSV processes parsed import rows inside a single transaction.
+// Tasks are matched by (title, type, user_id); a minimal task is created when no
+// match is found. Completions are inserted or updated (amount + skipped status);
+// existing receipt_file and note fields are never touched.
+func (db *DB) ImportCompletionsCSV(userID int64, rows []ImportRow) (ImportResult, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return ImportResult{}, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var result ImportResult
+	taskCache := map[string]int64{} // "title\x00type" → task_id
+
+	for _, row := range rows {
+		cacheKey := row.Title + "\x00" + row.Type
+		taskID, cached := taskCache[cacheKey]
+		if !cached {
+			var id int64
+			err := tx.QueryRow(
+				db.q(`SELECT id FROM tasks WHERE user_id = ? AND title = ? AND type = ?`),
+				userID, row.Title, row.Type,
+			).Scan(&id)
+			if err == sql.ErrNoRows {
+				// Create a minimal placeholder task.
+				if db.driver == "postgres" {
+					err = tx.QueryRow(
+						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`),
+						row.Title, "", row.Type, "{}", userID, 1,
+					).Scan(&id)
+				} else {
+					var res sql.Result
+					res, err = tx.Exec(
+						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval) VALUES (?, ?, ?, ?, ?, ?)`),
+						row.Title, "", row.Type, "{}", userID, 1,
+					)
+					if err == nil {
+						id, err = res.LastInsertId()
+					}
+				}
+				if err != nil {
+					return ImportResult{}, fmt.Errorf("create task %q: %w", row.Title, err)
+				}
+				result.TasksCreated++
+			} else if err != nil {
+				return ImportResult{}, fmt.Errorf("lookup task %q: %w", row.Title, err)
+			}
+			taskCache[cacheKey] = id
+			taskID = id
+		}
+
+		skipped := 0
+		if row.Status == "skipped" {
+			skipped = 1
+		}
+
+		var existingCount int
+		if err := tx.QueryRow(
+			db.q(`SELECT COUNT(*) FROM completions WHERE task_id = ? AND month = ?`),
+			taskID, row.Month,
+		).Scan(&existingCount); err != nil {
+			return ImportResult{}, fmt.Errorf("check completion %q %s: %w", row.Title, row.Month, err)
+		}
+
+		if existingCount == 0 {
+			completedAt := ""
+			if row.Status == "completed" {
+				completedAt = time.Now().UTC().Format(time.RFC3339)
+			}
+			if _, err := tx.Exec(
+				db.q(`INSERT INTO completions (task_id, month, amount, skipped, completed_at) VALUES (?, ?, ?, ?, ?)`),
+				taskID, row.Month, row.Amount, skipped, completedAt,
+			); err != nil {
+				return ImportResult{}, fmt.Errorf("insert completion %q %s: %w", row.Title, row.Month, err)
+			}
+			result.CompletionsCreated++
+		} else {
+			if _, err := tx.Exec(
+				db.q(`UPDATE completions SET amount = ?, skipped = ? WHERE task_id = ? AND month = ?`),
+				row.Amount, skipped, taskID, row.Month,
+			); err != nil {
+				return ImportResult{}, fmt.Errorf("update completion %q %s: %w", row.Title, row.Month, err)
+			}
+			result.CompletionsUpdated++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ImportResult{}, err
+	}
+	return result, nil
+}
+
 // ======== Users ========
 
 const userColumns = `id, username, password_hash, is_admin, created_at`

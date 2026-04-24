@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.6.0] — 2026-04-24
+
+### Added
+- **CSV import** — `POST /api/import/completions.csv` accepts the same format produced by the CSV export (`Title,Type,Month,Status,Amount,Has Receipt`). Tasks are matched by title + type; a minimal placeholder task is created when no match is found. Completions are inserted or updated atomically — existing receipts and notes are never touched. The `Has Receipt` column is accepted but ignored. Returns `{"tasks_created":N,"completions_created":N,"completions_updated":N}`. An Import section now appears below Export in the Reports view.
+
 ## [0.5.0] — 2026-04-24
 
 ### Added

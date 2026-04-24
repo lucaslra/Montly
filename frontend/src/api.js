@@ -142,3 +142,12 @@ export function exportCompletionsCSV(from, to) {
   if (to)   params.set('to', to)
   return fetch(`${BASE}/export/completions.csv?${params}`)
 }
+
+export async function importCompletionsCSV(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/import/completions.csv`, { method: 'POST', body: form })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Import failed')
+  return data
+}

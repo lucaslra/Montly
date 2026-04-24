@@ -1652,6 +1652,18 @@ body {
 
 .export-month-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
+.export-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.import-result {
+  font-size: 0.875rem;
+  color: var(--success, #16a34a);
+  margin-bottom: 6px;
+}
+
 /* ── Spending bar chart ───────────────────────────── */
 .spending-chart {
   display: flex;

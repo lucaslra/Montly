@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ReportView from '../components/ReportView.jsx'
 import * as api from '../api.js'
 
 vi.mock('../api.js', () => ({
-  fetchTasks:           vi.fn(),
-  fetchCompletions:     vi.fn(),
-  exportCompletionsCSV: vi.fn(),
+  fetchTasks:            vi.fn(),
+  fetchCompletions:      vi.fn(),
+  exportCompletionsCSV:  vi.fn(),
+  importCompletionsCSV:  vi.fn(),
 }))
 
 beforeEach(() => {
@@ -167,5 +168,71 @@ describe('ReportView ExportSection', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('invalid date range')
     )
+  })
+})
+
+// ── ImportSection ─────────────────────────────────────────────────────────────
+
+// jsdom does not fully implement the FileList API, so we simulate file selection
+// by defining the files property and firing a change event.
+function selectFile(input, file) {
+  Object.defineProperty(input, 'files', { value: [file], configurable: true })
+  fireEvent.change(input)
+}
+
+describe('ImportSection', () => {
+  it('renders the Import button disabled before a file is chosen', async () => {
+    renderReport()
+    await waitFor(() => screen.getByRole('button', { name: 'Import CSV' }))
+    expect(screen.getByRole('button', { name: 'Import CSV' })).toBeDisabled()
+  })
+
+  it('enables the button once a file is selected', async () => {
+    renderReport()
+    await waitFor(() => screen.getByRole('button', { name: 'Import CSV' }))
+    const file = new File(['col\n'], 'test.csv', { type: 'text/csv' })
+    const input = document.querySelector('input[type="file"]')
+    act(() => selectFile(input, file))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import CSV' })).not.toBeDisabled())
+  })
+
+  it('calls importCompletionsCSV and shows the result summary', async () => {
+    api.importCompletionsCSV.mockResolvedValue({ tasks_created: 1, completions_created: 3, completions_updated: 0 })
+    renderReport()
+    await waitFor(() => screen.getByRole('button', { name: 'Import CSV' }))
+    const file = new File(['col\n'], 'test.csv', { type: 'text/csv' })
+    const input = document.querySelector('input[type="file"]')
+    act(() => selectFile(input, file))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import CSV' })).not.toBeDisabled())
+    fireEvent.submit(input.closest('form'))
+    await waitFor(() => expect(api.importCompletionsCSV).toHaveBeenCalled())
+    expect(screen.getByRole('status')).toHaveTextContent('3 created')
+    expect(screen.getByRole('status')).toHaveTextContent('1 new task')
+  })
+
+  it('shows an error when the import fails', async () => {
+    api.importCompletionsCSV.mockRejectedValue(new Error('unexpected CSV header'))
+    renderReport()
+    await waitFor(() => screen.getByRole('button', { name: 'Import CSV' }))
+    const file = new File(['bad header\n'], 'bad.csv', { type: 'text/csv' })
+    const input = document.querySelector('input[type="file"]')
+    act(() => selectFile(input, file))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import CSV' })).not.toBeDisabled())
+    fireEvent.submit(input.closest('form'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('unexpected CSV header'))
+  })
+
+  it('shows Importing… while in flight and disables the button', async () => {
+    let resolve
+    api.importCompletionsCSV.mockReturnValue(new Promise(r => { resolve = r }))
+    renderReport()
+    await waitFor(() => screen.getByRole('button', { name: 'Import CSV' }))
+    const file = new File(['col\n'], 'f.csv', { type: 'text/csv' })
+    const input = document.querySelector('input[type="file"]')
+    act(() => selectFile(input, file))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import CSV' })).not.toBeDisabled())
+    fireEvent.submit(input.closest('form'))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Importing…' })).toBeDisabled())
+    resolve({ tasks_created: 0, completions_created: 0, completions_updated: 0 })
   })
 })

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { fetchTasks, fetchCompletions, exportCompletionsCSV } from '../api.js'
+import { fetchTasks, fetchCompletions, exportCompletionsCSV, importCompletionsCSV } from '../api.js'
 import { formatAmount } from '../utils.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -363,6 +363,9 @@ export default function ReportView({ month, tasks, completionMap, currency, numb
 
       {/* Export */}
       <ExportSection currentMonth={month} />
+
+      {/* Import */}
+      <ImportSection />
     </div>
   )
 }
@@ -431,6 +434,64 @@ function ExportSection({ currentMonth }) {
           {downloading ? 'Downloading…' : 'Download CSV'}
         </button>
       </form>
+    </section>
+  )
+}
+
+// ── ImportSection ─────────────────────────────────────────────────────────────
+
+function ImportSection() {
+  const [file, setFile]       = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState(null)
+  const [result, setResult]   = useState(null)
+  const inputRef              = useRef(null)
+
+  async function handleImport(e) {
+    e.preventDefault()
+    if (!file) return
+    setError(null)
+    setResult(null)
+    setLoading(true)
+    try {
+      const data = await importCompletionsCSV(file)
+      setResult(data)
+      setFile(null)
+      if (inputRef.current) inputRef.current.value = ''
+    } catch (err) {
+      setError(err.message ?? 'Import failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section className="report-section report-export">
+      <h3 className="report-section-title">Import</h3>
+      {error  && <p className="form-error" role="alert">{error}</p>}
+      {result && (
+        <p className="import-result" role="status">
+          Imported: {result.completions_created} created,{' '}
+          {result.completions_updated} updated
+          {result.tasks_created > 0 && `, ${result.tasks_created} new task${result.tasks_created !== 1 ? 's' : ''} created`}.
+        </p>
+      )}
+      <form className="export-form" onSubmit={handleImport}>
+        <input
+          ref={inputRef}
+          id="import-file"
+          type="file"
+          accept=".csv,text/csv"
+          onChange={e => { setFile(e.target.files[0] ?? null); setResult(null); setError(null) }}
+          required
+        />
+        <button type="submit" className="btn-secondary btn-sm" disabled={loading || !file}>
+          {loading ? 'Importing…' : 'Import CSV'}
+        </button>
+      </form>
+      <p className="export-hint">
+        Accepts the exported CSV format. Has Receipt column is ignored — receipts cannot be imported.
+      </p>
     </section>
   )
 }
