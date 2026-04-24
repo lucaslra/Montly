@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] — 2026-04-24
+
+### Added
+- **Skip-a-month state** — tasks can now be explicitly skipped so intentionally-skipped months are distinguishable from pending ones. Skip/un-skip buttons appear inline in the task list; toggling a skipped task marks it complete instead of removing the skip.
+- **`task.skipped` webhook event** — fired when a task is skipped, alongside the existing `task.completed` / `task.uncompleted` events.
+- **Audit log** — append-only `audit_logs` table records who completed, edited, deleted, or skipped tasks, and who managed users, tokens, webhooks, and passwords. Surfaced as a paginated table in admin Settings.
+- **CSV export includes `Status` column** — values: `completed` or `skipped`.
+
+### Changed
+- CI push trigger restricted to `main`; paths filter on both push and pull_request so doc-only changes don't burn CI minutes; concurrency group cancels stale in-progress runs.
+
 ## [0.3.2] — 2026-04-23
 
 ### Added
