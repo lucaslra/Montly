@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.0] — 2026-04-24
+
+### Added
+- **Amount backfill on price change** — updating a task's default amount now stamps the previous amount onto past completions that had no per-entry override, preserving historical accuracy without any schema changes.
+
+### Fixed
+- **Month picker squeezed in jump mode** — the inline panel was overriding `width: auto`, collapsing the month grid to text-only width; restored to the standard 220 px.
+- **Multi-arch Docker builds** — builder stages now use `--platform=$BUILDPLATFORM` and cross-compile via `GOOS`/`GOARCH`, removing slow QEMU emulation.
+
 ## [0.4.1] — 2026-04-24
 
 ### Fixed
