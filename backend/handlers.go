@@ -77,6 +77,14 @@ var allowedColorModes = map[string]bool{
 	"system": true, "light": true, "dark": true,
 }
 
+var allowedTaskSorts = map[string]bool{
+	"type": true, "name": true, "default": true,
+}
+
+var allowedNumberFormats = map[string]bool{
+	"en": true, "eu": true,
+}
+
 // taskOwnerCheck loads the task and returns it only if it belongs to userID.
 // Writes the appropriate error and returns false on failure.
 func (h *Handler) taskOwnerCheck(w http.ResponseWriter, taskID, userID int64) (Task, bool) {
@@ -155,6 +163,7 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	var req map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "invalid body", http.StatusBadRequest)
@@ -183,6 +192,35 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filtered["color_mode"] = v
+	}
+	if v, ok := req["task_sort"]; ok {
+		if !allowedTaskSorts[v] {
+			writeError(w, "task_sort must be one of: type, name, default", http.StatusBadRequest)
+			return
+		}
+		filtered["task_sort"] = v
+	}
+	if v, ok := req["completed_last"]; ok {
+		if v != "true" && v != "false" {
+			writeError(w, "completed_last must be true or false", http.StatusBadRequest)
+			return
+		}
+		filtered["completed_last"] = v
+	}
+	if v, ok := req["fiscal_year_start"]; ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 12 {
+			writeError(w, "fiscal_year_start must be 1–12", http.StatusBadRequest)
+			return
+		}
+		filtered["fiscal_year_start"] = strconv.Itoa(n)
+	}
+	if v, ok := req["number_format"]; ok {
+		if !allowedNumberFormats[v] {
+			writeError(w, "number_format must be one of: en, eu", http.StatusBadRequest)
+			return
+		}
+		filtered["number_format"] = v
 	}
 
 	userID := currentUser(r).UserID

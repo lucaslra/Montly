@@ -150,10 +150,23 @@ function TokensSection() {
   const [copied, setCopied]   = useState(false)
   const [error, setError]     = useState(null)
   const [confirmRevokeId, setConfirmRevokeId] = useState(null)
+  const triggerRefs  = useRef({})
+  const confirmYesRef = useRef(null)
+  const prevConfirmId = useRef(null)
 
   useEffect(() => {
     fetchTokens().then(setTokens).catch(err => setError(err.message))
   }, [])
+
+  useEffect(() => {
+    if (confirmRevokeId !== null) {
+      prevConfirmId.current = confirmRevokeId
+      confirmYesRef.current?.focus()
+    } else if (prevConfirmId.current !== null) {
+      triggerRefs.current[prevConfirmId.current]?.focus()
+      prevConfirmId.current = null
+    }
+  }, [confirmRevokeId])
 
   async function handleCreate(e) {
     e.preventDefault()
@@ -189,7 +202,7 @@ function TokensSection() {
       {error && <p className="form-error" role="alert">{error}</p>}
 
       {revealed && (
-        <div className="token-reveal">
+        <div className="token-reveal" role="alert">
           <p className="token-reveal-label">Copy this token now — it will not be shown again.</p>
           <div className="token-reveal-box">
             <code>{revealed}</code>
@@ -240,11 +253,11 @@ function TokensSection() {
               {confirmRevokeId === tok.id ? (
                 <span className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
                   <span className="delete-confirm-label">Revoke?</span>
-                  <button className="btn-icon btn-danger btn-sm" onClick={() => handleRevoke(tok.id)}>Yes</button>
+                  <button ref={confirmYesRef} className="btn-icon btn-danger btn-sm" onClick={() => handleRevoke(tok.id)}>Yes</button>
                   <button className="btn-icon btn-sm" onClick={() => setConfirmRevokeId(null)}>No</button>
                 </span>
               ) : (
-                <button className="btn-danger btn-sm" onClick={() => setConfirmRevokeId(tok.id)}>Revoke</button>
+                <button ref={el => { triggerRefs.current[tok.id] = el }} className="btn-danger btn-sm" onClick={() => setConfirmRevokeId(tok.id)}>Revoke</button>
               )}
             </li>
           ))}
@@ -266,10 +279,23 @@ function UsersSection({ currentUserId }) {
   const [creating, setCreating] = useState(false)
   const [error, setError]       = useState(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const triggerRefs   = useRef({})
+  const confirmYesRef = useRef(null)
+  const prevConfirmId = useRef(null)
 
   useEffect(() => {
     fetchUsers().then(setUsers).catch(err => setError(err.message))
   }, [])
+
+  useEffect(() => {
+    if (confirmDeleteId !== null) {
+      prevConfirmId.current = confirmDeleteId
+      confirmYesRef.current?.focus()
+    } else if (prevConfirmId.current !== null) {
+      triggerRefs.current[prevConfirmId.current]?.focus()
+      prevConfirmId.current = null
+    }
+  }, [confirmDeleteId])
 
   async function handleCreate(e) {
     e.preventDefault()
@@ -337,11 +363,11 @@ function UsersSection({ currentUserId }) {
                 confirmDeleteId === u.id ? (
                   <span className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
                     <span className="delete-confirm-label">Delete?</span>
-                    <button className="btn-icon btn-danger btn-sm" onClick={() => handleDelete(u.id)}>Yes</button>
+                    <button ref={confirmYesRef} className="btn-icon btn-danger btn-sm" onClick={() => handleDelete(u.id)}>Yes</button>
                     <button className="btn-icon btn-sm" onClick={() => setConfirmDeleteId(null)}>No</button>
                   </span>
                 ) : (
-                  <button className="btn-danger btn-sm" onClick={() => setConfirmDeleteId(u.id)}>Delete</button>
+                  <button ref={el => { triggerRefs.current[u.id] = el }} className="btn-danger btn-sm" onClick={() => setConfirmDeleteId(u.id)}>Delete</button>
                 )
               )}
             </li>
@@ -369,10 +395,23 @@ function WebhooksSection() {
   const [creating, setCreating] = useState(false)
   const [error,    setError]    = useState(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const triggerRefs   = useRef({})
+  const confirmYesRef = useRef(null)
+  const prevConfirmId = useRef(null)
 
   useEffect(() => {
     fetchWebhooks().then(setHooks).catch(err => setError(err.message))
   }, [])
+
+  useEffect(() => {
+    if (confirmDeleteId !== null) {
+      prevConfirmId.current = confirmDeleteId
+      confirmYesRef.current?.focus()
+    } else if (prevConfirmId.current !== null) {
+      triggerRefs.current[prevConfirmId.current]?.focus()
+      prevConfirmId.current = null
+    }
+  }, [confirmDeleteId])
 
   function toggleEvent(ev) {
     setEvents(prev =>
@@ -431,8 +470,8 @@ function WebhooksSection() {
           />
         </div>
         <div className="form-group">
-          <label>Events</label>
-          <div className="webhook-events">
+          <label id="wh-events-label">Events</label>
+          <div className="webhook-events" role="group" aria-labelledby="wh-events-label">
             {WEBHOOK_EVENTS.map(ev => (
               <label key={ev.value} className="webhook-event-label">
                 <input
@@ -477,11 +516,11 @@ function WebhooksSection() {
               {confirmDeleteId === hook.id ? (
                 <span className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
                   <span className="delete-confirm-label">Delete?</span>
-                  <button className="btn-icon btn-danger btn-sm" onClick={() => handleDelete(hook.id)}>Yes</button>
+                  <button ref={confirmYesRef} className="btn-icon btn-danger btn-sm" onClick={() => handleDelete(hook.id)}>Yes</button>
                   <button className="btn-icon btn-sm" onClick={() => setConfirmDeleteId(null)}>No</button>
                 </span>
               ) : (
-                <button className="btn-danger btn-sm" onClick={() => setConfirmDeleteId(hook.id)}>Delete</button>
+                <button ref={el => { triggerRefs.current[hook.id] = el }} className="btn-danger btn-sm" onClick={() => setConfirmDeleteId(hook.id)}>Delete</button>
               )}
             </li>
           ))}

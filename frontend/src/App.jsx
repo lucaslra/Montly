@@ -326,7 +326,8 @@ export default function App() {
       const saved = await updateSettings(newSettings)
       setSettings(saved)
     } catch (e) {
-      onApiError(e)
+      if (e.status === 401) setUser(false)
+      throw e
     }
   }
 
