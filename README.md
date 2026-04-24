@@ -63,7 +63,9 @@ make dev-frontend   # terminal 2 — Vite dev server on :5173
 Run tests:
 
 ```bash
-make test
+make test           # Go + frontend unit/integration tests
+make e2e            # Playwright E2E tests (full stack in Docker, headless)
+make e2e-headed     # Playwright E2E tests with a visible browser window
 ```
 
 Or build and run the full stack via Docker:

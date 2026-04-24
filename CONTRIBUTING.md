@@ -11,7 +11,7 @@ For anything beyond a small bug fix, open an issue first to discuss the change. 
 ```bash
 git clone <repo>
 cd montly
-make setup          # go mod tidy + npm install
+make setup          # go mod tidy + npm install (backend, frontend, and e2e)
 make dev-backend    # terminal 1 — Go API on :8080
 make dev-frontend   # terminal 2 — Vite dev server on :5173
 ```
@@ -24,6 +24,21 @@ Open `http://localhost:5173`. On first run you'll be prompted to create an admin
 make test           # runs both Go and frontend tests
 cd backend && go test ./...
 cd frontend && npm test
+```
+
+### E2E tests
+
+Playwright tests exercise the full stack (app + DB) inside Docker:
+
+```bash
+make e2e            # headless — runs entirely in Docker, cleans up automatically
+make e2e-headed     # visible browser — app in Docker, Playwright runs locally
+```
+
+For headed mode, install the browser binary once:
+
+```bash
+cd e2e && npx playwright install chromium
 ```
 
 All tests must pass before a PR can be merged.

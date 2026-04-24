@@ -25,7 +25,7 @@ Open `http://localhost:8080` — on first access you'll be prompted to create th
 | `ADMIN_USERNAME`   | *(optional)*  | Username for the initial admin account; omit to use the first-run UI setup instead |
 | `ADMIN_PASSWORD`   | *(optional)*  | Password for the initial admin account — must be ≥ 8 characters |
 | `SESSION_SECRET`   | *(random)*   | HMAC key for session cookies. Set a stable value so sessions survive restarts |
-| `SECURE_COOKIES`   | `false`      | Set `true` when serving over HTTPS — adds `Secure` flag and HSTS header |
+| `SECURE_COOKIES`   | `false`      | Set `true` when serving over HTTPS — adds `Secure` flag to cookies, HSTS header, and `upgrade-insecure-requests` to the CSP |
 | `DB_TYPE`          | `sqlite`     | `sqlite` or `postgres` |
 | `DATABASE_URL`     | *(required for postgres)* | Full Postgres connection string |
 | `TRUST_PROXY_HEADERS` | `false`   | Set `true` when behind a trusted reverse proxy that sets `X-Forwarded-For`. Required for accurate IP-based rate limiting. **Do not enable** unless a proxy you control is stripping or overwriting this header. |

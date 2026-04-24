@@ -10,8 +10,10 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 ## Dev workflow
 - `make up` — build image and start (always rebuilds)
 - `make dev-backend` + `make dev-frontend` — local dev (two terminals; Vite proxies /api to :8080)
-- `make setup` — first-time: go mod tidy + npm install
+- `make setup` — first-time: go mod tidy + npm install (backend, frontend, and e2e)
 - `make test` — run all tests (Go + frontend Vitest)
+- `make e2e` — run Playwright E2E tests fully in Docker (ephemeral DB, headless)
+- `make e2e-headed` — run E2E tests with a visible browser; app in Docker, Playwright runs locally (requires `cd e2e && npx playwright install chromium` once)
 
 ## Key conventions
 - All SQLite queries and migrations live in `backend/db.go`; migrations use idempotent ALTER TABLE
@@ -56,6 +58,12 @@ On a fresh install with no users in the DB, the app serves a registration form (
   - `ReportView.test.jsx` — chart rendering, stat cards, loading and empty states
   - `api.test.js` — HTTP layer: status codes, error handling, request shape
   - `utils.test.js` — `formatAmount` en/eu number formats
+- **E2E:** `make e2e` — Playwright 1.52 against the full Docker stack; 72 tests across 4 suites:
+  - `01-auth.spec.ts` — setup flow, login/logout, protected routes, token auth
+  - `02-tasks.spec.ts` — create, edit, delete, search, CSV import
+  - `03-completions.spec.ts` — toggle, amount editing, receipt attach/remove, notes, skip, cross-month isolation
+  - `04-settings.spec.ts` — preferences, password change, API tokens, webhooks, user management, audit log
+  - `e2e/global-setup.ts` runs once to create the admin account and persist the session; `e2e/fixtures/` holds runtime-generated test files (gitignored)
 
 ## Available agents
 Use these for focused reviews (invoke via subagent):
