@@ -11,6 +11,7 @@ import (
 	"os"
 	pathpkg "path"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -215,8 +216,31 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	startMonthDigestScheduler(ctx, db)
+
 	log.Printf("montly listening on :%s (db=%s, secure=%v)", port, dbType, secureCookies)
 	log.Fatal(http.ListenAndServe(":"+port, r))
+}
+
+// startMonthDigestScheduler fires FireMonthDigest at 08:00 UTC on the 1st of
+// every month for as long as ctx is live.
+func startMonthDigestScheduler(ctx context.Context, db *DB) {
+	go func() {
+		for {
+			now := time.Now().UTC()
+			// First of next month at 08:00 UTC (AddDate handles December → January correctly).
+			firstOfNext := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+			next := time.Date(firstOfNext.Year(), firstOfNext.Month(), 1, 8, 0, 0, 0, time.UTC)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Until(next)):
+			}
+			month := next.Format("2006-01")
+			log.Printf("firing month.digest for %s", month)
+			FireMonthDigest(db, month)
+		}
+	}()
 }
 
 func mountAPI(r chi.Router, h *Handler) {

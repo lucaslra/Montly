@@ -24,6 +24,7 @@ var allowedWebhookEvents = map[string]bool{
 	"task.completed":   true,
 	"task.uncompleted": true,
 	"task.skipped":     true,
+	"month.digest":     true,
 }
 
 // WebhookHandler handles CRUD for webhooks.
@@ -98,7 +99,7 @@ func (h *WebhookHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, ev := range req.Events {
 		if !allowedWebhookEvents[ev] {
-			writeError(w, fmt.Sprintf("unknown event %q; allowed: task.completed, task.uncompleted, task.skipped", ev), http.StatusBadRequest)
+			writeError(w, fmt.Sprintf("unknown event %q; allowed: task.completed, task.uncompleted, task.skipped, month.digest", ev), http.StatusBadRequest)
 			return
 		}
 	}
@@ -144,6 +145,22 @@ type webhookPayload struct {
 	TaskTitle string `json:"task_title"`
 	Month     string `json:"month"`
 	Timestamp string `json:"timestamp"`
+}
+
+type digestTaskItem struct {
+	ID     int64  `json:"id"`
+	Title  string `json:"title"`
+	Type   string `json:"type"`
+	Amount string `json:"amount,omitempty"`
+}
+
+type digestPayload struct {
+	Event       string           `json:"event"`
+	Month       string           `json:"month"`
+	TaskCount   int              `json:"task_count"`
+	Tasks       []digestTaskItem `json:"tasks"`
+	TotalAmount string           `json:"total_amount,omitempty"`
+	Timestamp   string           `json:"timestamp"`
 }
 
 // FireWebhooks sends the event to all matching webhooks for userID. Runs in a goroutine;
@@ -193,5 +210,90 @@ func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, m
 				log.Printf("FireWebhooks(%d): remote returned %d", hook.ID, resp.StatusCode)
 			}
 		}(wh)
+	}
+}
+
+// FireMonthDigest sends a month.digest webhook to every user subscribed to that
+// event. Called by the monthly scheduler; runs entirely in background goroutines.
+func FireMonthDigest(db *DB, month string) {
+	users, err := db.ListUsers()
+	if err != nil {
+		log.Printf("FireMonthDigest: list users: %v", err)
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	for _, u := range users {
+		hooks, err := db.GetWebhooksForUser(u.ID)
+		if err != nil {
+			log.Printf("FireMonthDigest: hooks for user %d: %v", u.ID, err)
+			continue
+		}
+		var digestHooks []Webhook
+		for _, h := range hooks {
+			if strings.Contains(","+h.Events+",", ",month.digest,") {
+				digestHooks = append(digestHooks, h)
+			}
+		}
+		if len(digestHooks) == 0 {
+			continue
+		}
+
+		tasks, err := db.GetTasks(month, u.ID)
+		if err != nil {
+			log.Printf("FireMonthDigest: tasks for user %d: %v", u.ID, err)
+			continue
+		}
+
+		items := make([]digestTaskItem, 0, len(tasks))
+		var total float64
+		for _, t := range tasks {
+			amt := extractAmount(string(t.Metadata))
+			if v, err := strconv.ParseFloat(amt, 64); err == nil {
+				total += v
+			}
+			items = append(items, digestTaskItem{ID: t.ID, Title: t.Title, Type: t.Type, Amount: amt})
+		}
+		var totalStr string
+		if total > 0 {
+			totalStr = strconv.FormatFloat(total, 'f', 2, 64)
+		}
+
+		payload := digestPayload{
+			Event:       "month.digest",
+			Month:       month,
+			TaskCount:   len(items),
+			Tasks:       items,
+			TotalAmount: totalStr,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+		body, _ := json.Marshal(payload)
+
+		for _, hook := range digestHooks {
+			go func(h Webhook) {
+				req, err := http.NewRequest(http.MethodPost, h.URL, bytes.NewReader(body))
+				if err != nil {
+					log.Printf("FireMonthDigest(%d): build request: %v", h.ID, err)
+					return
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("User-Agent", "Montly-Webhook/1")
+				if h.Secret != "" {
+					mac := hmac.New(sha256.New, []byte(h.Secret))
+					mac.Write(body)
+					req.Header.Set("X-Montly-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+				}
+				resp, err := client.Do(req)
+				if err != nil {
+					log.Printf("FireMonthDigest(%d): deliver: %v", h.ID, err)
+					return
+				}
+				resp.Body.Close()
+				if resp.StatusCode >= 400 {
+					log.Printf("FireMonthDigest(%d): remote returned %d", h.ID, resp.StatusCode)
+				}
+			}(hook)
+		}
 	}
 }

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.10.0] — 2026-04-24
+
+### Added
+- **Monthly digest webhook** — new `month.digest` event fires at 08:00 UTC on the 1st of every month. Payload includes the full task list for that month with types and amounts, plus a `total_amount` sum. Subscribe per-webhook in Settings → Webhooks.
+
+### Fixed
+- **CSP inline script error** — disabled Vite's `modulepreload` polyfill, which was injecting an inline script blocked by `default-src 'self'`. Native modulepreload support is effectively universal; the polyfill is unnecessary.
+
 ## [0.9.0] — 2026-04-24
 
 ### Changed

@@ -385,6 +385,7 @@ function UsersSection({ currentUserId }) {
 const WEBHOOK_EVENTS = [
   { value: 'task.completed',   label: 'Task completed' },
   { value: 'task.uncompleted', label: 'Task uncompleted' },
+  { value: 'month.digest',     label: 'Monthly digest (1st of month, 08:00 UTC)' },
 ]
 
 function WebhooksSection() {
