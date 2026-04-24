@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.7.0] — 2026-04-24
+
+### Added
+- **Playwright E2E suite** — 72 tests across 4 serial specs (auth, tasks, completions, settings) run against the full Docker stack with an ephemeral database. `make e2e` runs headless in Docker; `make e2e-headed` runs with a visible browser (app in Docker, Playwright local). `make setup` now also installs E2E dependencies.
+
+### Fixed
+- **CSP `upgrade-insecure-requests` on HTTP deployments** — the directive was set unconditionally, causing Chromium to silently upgrade all same-origin HTTP asset requests to HTTPS for non-`localhost` origins (e.g. the Docker service hostname `app`), which prevented the JS bundle from loading and broke the login flow. The directive is now only included when `SECURE_COOKIES=true`.
+
 ## [0.6.0] — 2026-04-24
 
 ### Added
