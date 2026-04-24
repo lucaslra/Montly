@@ -642,7 +642,13 @@ const ADMIN_TABS = [
 ]
 
 export default function SettingsView({ settings, onSave, user }) {
-  const [activeTab,       setActiveTab]       = useState('preferences')
+  const tabs = user?.is_admin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS
+  const validIds = tabs.map(t => t.id)
+
+  const [activeTab, setActiveTab] = useState(() => {
+    const hash = window.location.hash.slice(1)
+    return validIds.includes(hash) ? hash : 'preferences'
+  })
   const [currency,        setCurrency]        = useState(settings.currency          ?? '€')
   const [dateFormat,      setDateFormat]      = useState(settings.date_format       ?? 'long')
   const [colorMode,       setColorMode]       = useState(settings.color_mode        ?? 'system')
@@ -656,6 +662,11 @@ export default function SettingsView({ settings, onSave, user }) {
   const savedAtTimer = useRef(null)
 
   useEffect(() => { setColorMode(settings.color_mode ?? 'system') }, [settings.color_mode])
+
+  // Normalize URL to always reflect the active tab
+  useEffect(() => {
+    window.history.replaceState(null, '', '#' + activeTab)
+  }, [activeTab])
 
   const isDirty =
     currency        !== (settings.currency          ?? '€')      ||
@@ -686,7 +697,9 @@ export default function SettingsView({ settings, onSave, user }) {
     }
   }
 
-  const tabs = user?.is_admin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS
+  function switchTab(id) {
+    setActiveTab(id)
+  }
 
   function panel(id) {
     return `settings-tab-panel${activeTab !== id ? ' settings-tab-panel--hidden' : ''}`
@@ -706,7 +719,7 @@ export default function SettingsView({ settings, onSave, user }) {
               aria-selected={activeTab === tab.id}
               aria-controls={`settings-panel-${tab.id}`}
               className={`settings-tab-btn${activeTab === tab.id ? ' active' : ''}`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => switchTab(tab.id)}
             >
               {tab.label}
             </button>

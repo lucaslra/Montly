@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.11.0] — 2026-04-24
+
+### Added
+- **Settings tab deep-links** — each Settings tab now has a unique URL (`/settings#preferences`, `/settings#tokens`, etc.). The active tab is reflected in the hash on switch and restored on load, so links and back-navigation land on the right tab.
+
+### Fixed
+- **CSP inline script error (residual)** — added an explicit `script-src 'self'` directive and whitelisted the remaining blocked inline-script hash, covering builds served from a cached Docker layer that pre-dates the `modulepreload` polyfill fix.
+
 ## [0.10.0] — 2026-04-24
 
 ### Added

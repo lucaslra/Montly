@@ -27,7 +27,10 @@ func securityHeaders(secure bool) func(http.Handler) http.Handler {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+			// script-src: 'self' for external module scripts (Vite build output);
+			// hash allows the Vite modulepreload-polyfill inline script that may be
+			// present in older builds served from a cached Docker layer.
+			csp := "default-src 'self'; script-src 'self' 'sha256-ZswfTY7H35rbv8WC7NXBoiC7WNu86vSzCDChNWwZZDM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
 			if secure {
 				csp += "; upgrade-insecure-requests"
 			}
