@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.8.0] — 2026-04-24
+
+### Changed
+- **Landing page** — added favicon (blue rounded "M"), version badge in the hero linking to the current release, `docker pull ghcr.io/lucaslra/montly:latest` as an alternative install path, and full social preview tags (`og:image`, `og:url`, `og:type`, image dimensions, `twitter:card`) so WhatsApp, Slack, and iMessage generate rich link previews.
+
 ## [0.7.0] — 2026-04-24
 
 ### Added
