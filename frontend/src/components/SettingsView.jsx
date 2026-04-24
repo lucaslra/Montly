@@ -629,7 +629,19 @@ function AuditLogSection() {
 
 // ---------- Main SettingsView ----------
 
+const BASE_TABS = [
+  { id: 'preferences', label: 'Preferences' },
+  { id: 'password',    label: 'Password' },
+  { id: 'tokens',      label: 'API Tokens' },
+  { id: 'webhooks',    label: 'Webhooks' },
+]
+const ADMIN_TABS = [
+  { id: 'users', label: 'Users' },
+  { id: 'audit', label: 'Audit' },
+]
+
 export default function SettingsView({ settings, onSave, user }) {
+  const [activeTab,       setActiveTab]       = useState('preferences')
   const [currency,        setCurrency]        = useState(settings.currency          ?? '€')
   const [dateFormat,      setDateFormat]      = useState(settings.date_format       ?? 'long')
   const [colorMode,       setColorMode]       = useState(settings.color_mode        ?? 'system')
@@ -673,120 +685,188 @@ export default function SettingsView({ settings, onSave, user }) {
     }
   }
 
+  const tabs = user?.is_admin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS
+
+  function panel(id) {
+    return `settings-tab-panel${activeTab !== id ? ' settings-tab-panel--hidden' : ''}`
+  }
+
   return (
     <div className="settings-view">
       <h2>Settings</h2>
 
-      {/* fix 1: save error */}
-      {error && (
-        <div className="error-banner">
-          <span>{error}</span>
-          <button className="error-dismiss" onClick={() => setError(null)} title="Dismiss" aria-label="Dismiss error">✕</button>
+      <div className="settings-tabs-container">
+        <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              role="tab"
+              id={`settings-tab-${tab.id}`}
+              aria-selected={activeTab === tab.id}
+              aria-controls={`settings-panel-${tab.id}`}
+              className={`settings-tab-btn${activeTab === tab.id ? ' active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-      )}
 
-      <form onSubmit={handleSubmit} className="settings-form">
-        <div className="settings-section">
-
-          <div className="form-group">
-            <label htmlFor="s-currency">Currency</label>
-            <select id="s-currency" value={currency} onChange={e => setCurrency(e.target.value)}>
-              {CURRENCY_GROUPS.map(g => (
-                <optgroup key={g.label} label={g.label}>
-                  {g.options.map(c => (
-                    <option key={c.symbol} value={c.symbol}>{c.label}</option>
+        {/* Preferences */}
+        <div
+          role="tabpanel"
+          id="settings-panel-preferences"
+          aria-labelledby="settings-tab-preferences"
+          className={panel('preferences')}
+        >
+          {error && (
+            <div className="error-banner">
+              <span>{error}</span>
+              <button className="error-dismiss" onClick={() => setError(null)} title="Dismiss" aria-label="Dismiss error">✕</button>
+            </div>
+          )}
+          <form onSubmit={handleSubmit} className="settings-form">
+            <div className="settings-section">
+              <div className="form-group">
+                <label htmlFor="s-currency">Currency</label>
+                <select id="s-currency" value={currency} onChange={e => setCurrency(e.target.value)}>
+                  {CURRENCY_GROUPS.map(g => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.options.map(c => (
+                        <option key={c.symbol} value={c.symbol}>{c.label}</option>
+                      ))}
+                    </optgroup>
                   ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="s-date-format">Month display</label>
+                <select id="s-date-format" value={dateFormat} onChange={e => setDateFormat(e.target.value)}>
+                  {DATE_FORMATS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="s-color-mode">Appearance</label>
+                <select id="s-color-mode" value={colorMode} onChange={e => setColorMode(e.target.value)}>
+                  {COLOR_MODES.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="s-task-sort">Task order</label>
+                <select id="s-task-sort" value={taskSort} onChange={e => setTaskSort(e.target.value)}>
+                  {TASK_SORT_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="s-completed-last">Completed tasks</label>
+                <select id="s-completed-last" value={completedLast} onChange={e => setCompletedLast(e.target.value)}>
+                  {COMPLETED_LAST_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="s-fiscal-year-start">Fiscal year starts</label>
+                <select id="s-fiscal-year-start" value={fiscalYearStart} onChange={e => setFiscalYearStart(e.target.value)}>
+                  {FISCAL_YEAR_MONTHS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="s-number-format">Number format</label>
+                <select id="s-number-format" value={numberFormat} onChange={e => setNumberFormat(e.target.value)}>
+                  {NUMBER_FORMAT_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="s-date-format">Month display</label>
-            <select id="s-date-format" value={dateFormat} onChange={e => setDateFormat(e.target.value)}>
-              {DATE_FORMATS.map(f => (
-                <option key={f.value} value={f.value}>{f.label}</option>
-              ))}
-            </select>
-          </div>
+            <div className="settings-preview">
+              <span className="settings-preview-label">Preview</span>
+              <span className="settings-preview-value">
+                {previewMonth(dateFormat)} · {formatAmount(1234.56, currency, numberFormat)}
+              </span>
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="s-color-mode">Appearance</label>
-            <select id="s-color-mode" value={colorMode} onChange={e => setColorMode(e.target.value)}>
-              {COLOR_MODES.map(m => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="s-task-sort">Task order</label>
-            <select id="s-task-sort" value={taskSort} onChange={e => setTaskSort(e.target.value)}>
-              {TASK_SORT_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="s-completed-last">Completed tasks</label>
-            <select id="s-completed-last" value={completedLast} onChange={e => setCompletedLast(e.target.value)}>
-              {COMPLETED_LAST_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="s-fiscal-year-start">Fiscal year starts</label>
-            <select id="s-fiscal-year-start" value={fiscalYearStart} onChange={e => setFiscalYearStart(e.target.value)}>
-              {FISCAL_YEAR_MONTHS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="s-number-format">Number format</label>
-            <select id="s-number-format" value={numberFormat} onChange={e => setNumberFormat(e.target.value)}>
-              {NUMBER_FORMAT_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
+            <div className="settings-save-row">
+              <span className="settings-save-status" aria-live="polite">
+                {isDirty
+                  ? <span className="settings-dirty">Unsaved changes</span>
+                  : savedAt
+                    ? <span className="settings-saved-at">Saved at {savedAt}</span>
+                    : null}
+              </span>
+              <button type="submit" className="btn-primary" disabled={saving || !isDirty}>
+                {saving
+                  ? <><span className="btn-spinner" aria-hidden="true" /> Saving…</>
+                  : 'Save'}
+              </button>
+            </div>
+          </form>
         </div>
 
-        {/* live preview */}
-        <div className="settings-preview">
-          <span className="settings-preview-label">Preview</span>
-          <span className="settings-preview-value">
-            {previewMonth(dateFormat)} · {formatAmount(1234.56, currency, numberFormat)}
-          </span>
+        {/* Password */}
+        <div
+          role="tabpanel"
+          id="settings-panel-password"
+          aria-labelledby="settings-tab-password"
+          className={panel('password')}
+        >
+          <PasswordSection />
         </div>
 
-        {/* fix 3 + 6 + 8 */}
-        <div className="settings-save-row">
-          <span className="settings-save-status" aria-live="polite">
-            {isDirty
-              ? <span className="settings-dirty">Unsaved changes</span>
-              : savedAt
-                ? <span className="settings-saved-at">Saved at {savedAt}</span>
-                : null}
-          </span>
-          <button type="submit" className="btn-primary" disabled={saving || !isDirty}>
-            {saving
-              ? <><span className="btn-spinner" aria-hidden="true" /> Saving…</>
-              : 'Save'}
-          </button>
+        {/* API Tokens */}
+        <div
+          role="tabpanel"
+          id="settings-panel-tokens"
+          aria-labelledby="settings-tab-tokens"
+          className={panel('tokens')}
+        >
+          <TokensSection />
         </div>
-      </form>
 
-      <PasswordSection />
-      <TokensSection />
-      <WebhooksSection />
-      {user?.is_admin && <UsersSection currentUserId={user.id} />}
-      {user?.is_admin && <AuditLogSection />}
+        {/* Webhooks */}
+        <div
+          role="tabpanel"
+          id="settings-panel-webhooks"
+          aria-labelledby="settings-tab-webhooks"
+          className={panel('webhooks')}
+        >
+          <WebhooksSection />
+        </div>
+
+        {/* Users (admin only) */}
+        {user?.is_admin && (
+          <div
+            role="tabpanel"
+            id="settings-panel-users"
+            aria-labelledby="settings-tab-users"
+            className={panel('users')}
+          >
+            <UsersSection currentUserId={user.id} />
+          </div>
+        )}
+
+        {/* Audit (admin only) */}
+        {user?.is_admin && (
+          <div
+            role="tabpanel"
+            id="settings-panel-audit"
+            aria-labelledby="settings-tab-audit"
+            className={panel('audit')}
+          >
+            <AuditLogSection />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

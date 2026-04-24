@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.9.0] — 2026-04-24
+
+### Changed
+- **Settings tabs** — the Settings page is now split into six tabs (Preferences, Password, API Tokens, Webhooks, Users, Audit), eliminating the long single-page scroll. Users and Audit tabs are only visible to admins.
+
 ## [0.8.0] — 2026-04-24
 
 ### Changed

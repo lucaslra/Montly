@@ -1079,6 +1079,54 @@ body {
   font-weight: 600;
 }
 
+/* ── Settings tabs ───────────────────────────────── */
+.settings-tabs-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tabs {
+  display: flex;
+  border-bottom: 2px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.settings-tabs::-webkit-scrollbar { display: none; }
+
+.settings-tab-btn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  min-height: 40px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 0.875rem;
+  font-family: inherit;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-bottom-color 0.15s;
+  white-space: nowrap;
+}
+.settings-tab-btn:hover { color: var(--text); }
+.settings-tab-btn[aria-selected="true"] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 500;
+}
+
+.settings-tab-panel {
+  padding-top: 20px;
+}
+.settings-tab-panel--hidden { display: none; }
+
+/* Remove the divider styling when a section block is the sole content of a panel */
+.settings-tab-panel > .settings-section-block {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;
