@@ -542,6 +542,27 @@ func TestUpdateTask(t *testing.T) {
 			bob.ID, false))
 		assertStatus(t, w, http.StatusNotFound)
 	})
+
+	t.Run("amount change backfills past completions", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task, _ := ts.db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), alice.ID, 1)
+		ts.db.AddCompletion(task.ID, "2026-01")
+		ts.db.AddCompletion(task.ID, "2026-02")
+
+		w := ts.do(ts.authReq(t, http.MethodPut,
+			fmt.Sprintf("/api/tasks/%d", task.ID),
+			`{"title":"Netflix","metadata":{"amount":"11"}}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+
+		for _, month := range []string{"2026-01", "2026-02"} {
+			c, _, _ := ts.db.GetCompletion(task.ID, month)
+			if c.Amount != "10" {
+				t.Errorf("completion %s: amount = %q, want '10'", month, c.Amount)
+			}
+		}
+	})
 }
 
 // ── DeleteTask ────────────────────────────────────────────────────────────────

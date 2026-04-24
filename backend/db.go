@@ -711,6 +711,71 @@ func (db *DB) UpdateTask(id int64, title, description, taskType, startDate, endD
 	return db.GetTaskByID(id)
 }
 
+// extractAmount pulls the "amount" string from a JSON metadata blob.
+// Returns "" on any parse failure or if the key is absent.
+func extractAmount(rawMeta string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(rawMeta), &m); err != nil {
+		return ""
+	}
+	a, _ := m["amount"].(string)
+	return a
+}
+
+// UpdateTaskWithAmountBackfill updates a task and, when the metadata amount changes,
+// stamps the previous amount onto past completions that held no per-completion override
+// (amount = ''). This preserves historical accuracy without any schema changes.
+func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskType, startDate, endDate string, metadata json.RawMessage, interval int) (Task, error) {
+	if len(metadata) == 0 {
+		metadata = json.RawMessage(`{}`)
+	}
+	if interval <= 0 {
+		interval = 1
+	}
+	var sd, ed *string
+	if startDate != "" {
+		sd = &startDate
+	}
+	if endDate != "" {
+		ed = &endDate
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return Task{}, err
+	}
+	defer tx.Rollback()
+
+	var rawOld string
+	if err := tx.QueryRow(db.q(`SELECT metadata FROM tasks WHERE id = ?`), id).Scan(&rawOld); err != nil {
+		return Task{}, err
+	}
+
+	oldAmount := extractAmount(rawOld)
+	newAmount := extractAmount(string(metadata))
+
+	if _, err := tx.Exec(
+		db.q(`UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?, start_date = ?, end_date = ?, interval = ? WHERE id = ?`),
+		title, description, taskType, string(metadata), sd, ed, interval, id,
+	); err != nil {
+		return Task{}, err
+	}
+
+	if oldAmount != "" && newAmount != oldAmount {
+		if _, err := tx.Exec(
+			db.q(`UPDATE completions SET amount = ? WHERE task_id = ? AND (amount = '' OR amount IS NULL)`),
+			oldAmount, id,
+		); err != nil {
+			return Task{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Task{}, err
+	}
+	return db.GetTaskByID(id)
+}
+
 func (db *DB) DeleteTask(id int64) error {
 	_, err := db.Exec(db.q(`DELETE FROM tasks WHERE id = ?`), id)
 	return err

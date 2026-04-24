@@ -19,6 +19,7 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 - Frontend API calls are centralized in `frontend/src/api.js`
 - Shared frontend utilities (e.g. `formatAmount`) live in `frontend/src/utils.js`
 - Receipt files are uuid-named and stored in DATA_DIR/receipts/; unchecking a task removes the receipt AND the file
+- `PUT /api/tasks/:id` backfills completion amounts: when a task's `metadata.amount` changes, past completions with no per-entry override have the old amount stamped onto them, preserving historical accuracy (`UpdateTaskWithAmountBackfill` in `db.go`)
 - A mobile app will be added in the future — keep API design flexible
 
 ## First-run setup

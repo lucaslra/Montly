@@ -376,7 +376,7 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	task, err := h.db.UpdateTask(id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, req.Interval)
+	task, err := h.db.UpdateTaskWithAmountBackfill(id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, req.Interval)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "task not found", http.StatusNotFound)
 		return

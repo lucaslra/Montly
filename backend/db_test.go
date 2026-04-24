@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -374,6 +375,79 @@ func TestTaskCRUD(t *testing.T) {
 	if err == nil {
 		t.Error("expected error after delete, got nil")
 	}
+}
+
+func TestUpdateTaskWithAmountBackfill(t *testing.T) {
+	t.Run("stamps old amount onto empty-amount completions", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), user.ID, 1)
+		db.AddCompletion(task.ID, "2026-01")
+		db.AddCompletion(task.ID, "2026-02")
+
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"11"}`), task.Interval); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+
+		for _, month := range []string{"2026-01", "2026-02"} {
+			c, _, err := db.GetCompletion(task.ID, month)
+			if err != nil {
+				t.Fatalf("get completion %s: %v", month, err)
+			}
+			if c.Amount != "10" {
+				t.Errorf("completion %s: amount = %q, want '10'", month, c.Amount)
+			}
+		}
+	})
+
+	t.Run("manual per-completion overrides are not touched", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), user.ID, 1)
+		db.AddCompletion(task.ID, "2026-01")
+		db.SetCompletionAmount(task.ID, "2026-01", "9") // manual override
+
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"11"}`), task.Interval); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+
+		c, _, _ := db.GetCompletion(task.ID, "2026-01")
+		if c.Amount != "9" {
+			t.Errorf("amount: got %q, want '9' (manual override should be preserved)", c.Amount)
+		}
+	})
+
+	t.Run("non-amount changes do not touch completions", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), user.ID, 1)
+		db.AddCompletion(task.ID, "2026-01")
+
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, "New Title", task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"10"}`), task.Interval); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+
+		c, _, _ := db.GetCompletion(task.ID, "2026-01")
+		if c.Amount != "" {
+			t.Errorf("amount: got %q, want '' (unchanged)", c.Amount)
+		}
+	})
+
+	t.Run("no previous amount set means no backfill", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", nil, user.ID, 1)
+		db.AddCompletion(task.ID, "2026-01")
+
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"11"}`), task.Interval); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+
+		c, _, _ := db.GetCompletion(task.ID, "2026-01")
+		if c.Amount != "" {
+			t.Errorf("amount: got %q, want '' (no old amount to stamp)", c.Amount)
+		}
+	})
 }
 
 func TestGetTasks_StartDateFilter(t *testing.T) {
