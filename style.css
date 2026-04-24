@@ -100,6 +100,24 @@ code {
 }
 .nav-links a:not(.btn):hover { color: var(--text); text-decoration: none; }
 
+/* ── Version badge ───────────────────────────────────────────── */
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  padding: .2rem .8rem;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  margin-bottom: 18px;
+  text-decoration: none !important;
+  transition: background .15s, color .15s;
+}
+.version-badge:hover { background: var(--accent); color: #fff; }
+
 /* ── Hero ────────────────────────────────────────────────────── */
 .hero {
   padding: 80px 0 60px;
@@ -279,6 +297,21 @@ figcaption {
   gap: 12px;
   justify-content: center;
   flex-wrap: wrap;
+}
+.install-alt {
+  margin-top: 36px;
+}
+.install-alt-label {
+  display: block;
+  font-size: .8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.install-alt .code-block {
+  margin-bottom: 0;
 }
 
 /* ── Stack ───────────────────────────────────────────────────── */

@@ -5,9 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montly — Self-hosted monthly task tracker</title>
   <meta name="description" content="Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI. Self-hosted, open source.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://lucaslra.github.io/Montly/">
   <meta property="og:title" content="Montly — Self-hosted monthly task tracker">
   <meta property="og:description" content="Track bills, subscriptions, payments, and reminders. Self-hosted, open source, Docker-ready.">
-  <meta property="og:image" content="screenshots/tasks.png">
+  <meta property="og:image" content="https://lucaslra.github.io/Montly/screenshots/tasks.png">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="800">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Montly — Self-hosted monthly task tracker">
+  <meta name="twitter:description" content="Track bills, subscriptions, payments, and reminders. Self-hosted, open source, Docker-ready.">
+  <meta name="twitter:image" content="https://lucaslra.github.io/Montly/screenshots/tasks.png">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -28,6 +37,7 @@
   <section class="hero">
     <div class="hero-inner">
       <div class="hero-text">
+        <a href="https://github.com/lucaslra/Montly/releases/tag/v0.7.0" class="version-badge">v0.7.0</a>
         <h1>Never miss a payment<br>or subscription again.</h1>
         <p class="hero-sub">
           Montly is a self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI.
@@ -135,6 +145,12 @@ docker compose up -d</code></pre>
       <div class="install-links">
         <a href="https://github.com/lucaslra/Montly/blob/main/docs/deployment.md" class="btn btn-primary">Full deployment guide</a>
         <a href="https://github.com/lucaslra/Montly/blob/main/CHANGELOG.md" class="btn btn-outline">Changelog</a>
+      </div>
+      <div class="install-alt">
+        <span class="install-alt-label">Or pull the pre-built image:</span>
+        <div class="code-block">
+          <pre><code>docker pull ghcr.io/lucaslra/montly:latest</code></pre>
+        </div>
       </div>
     </div>
   </section>
