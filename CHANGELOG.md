@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.1] — 2026-04-24
+
+### Fixed
+- **Settings not saving** — `task_sort`, `completed_last`, `fiscal_year_start`, and `number_format` were silently dropped by `UpdateSettings`; changes appeared to save but reverted immediately on the next response
+- **`fiscal_year_start` normalisation** — leading-zero values (e.g. `"007"`) now stored as the canonical integer string (`"7"`)
+- **Unbounded `UpdateSettings` body** — added `MaxBytesReader` (4 KB cap) to match every other JSON-body handler; previously any client could stream an arbitrarily large body
+- **Settings save error swallowed** — `handleSaveSettings` caught API errors without re-throwing, making the in-form error banner in `SettingsView` unreachable; errors now propagate correctly
+
+### Accessibility
+- Token reveal box now carries `role="alert"` so screen readers announce the one-time token immediately on creation (WCAG 4.1.3)
+- Webhook events checkbox group now uses `role="group"` + `aria-labelledby` so the group label is programmatically associated (WCAG 1.3.1, 4.1.2)
+- Confirm dialogs (Revoke token, Delete user, Delete webhook) now manage focus: the **Yes** button receives focus when the dialog opens; focus returns to the trigger when dismissed with **No** (WCAG 2.4.3)
+
 ## [0.4.0] — 2026-04-24
 
 ### Added
