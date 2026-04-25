@@ -41,7 +41,8 @@
         <a href="https://github.com/lucaslra/Montly/releases/tag/v0.12.0" class="version-badge">v0.12.0</a>
         <h1>Never miss a payment or subscription again.</h1>
         <p class="hero-sub">
-          Montly is a self-hosted monthly recurring task tracker. Track bills, subscriptions, payments, and reminders — with receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI.
+          Montly tracks bills, subscriptions, payments, and reminders — month by month, automatically.
+          Receipt uploads, spending reports, multi-user support, and a clean mobile-friendly UI, all self-hosted.
         </p>
         <div class="hero-actions">
           <a href="#install" class="btn btn-primary">Get started</a>
@@ -88,7 +89,7 @@
         <div class="feature-card">
           <div class="feature-icon">&#128274;</div>
           <h3>API tokens &amp; webhooks</h3>
-          <p>Headless access via <code>Bearer mt_…</code> tokens. Outbound webhooks on task completion, uncompletion, skip, and monthly digest.</p>
+          <p>Headless access via <code>Bearer mt_…</code> tokens. Outbound webhooks on task completion, uncompletion, skip, and monthly digest. Test webhooks directly from the Settings panel.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">&#128296;</div>
@@ -115,11 +116,11 @@
       <h2>A closer look</h2>
       <div class="screenshot-grid">
         <figure>
-          <img src="screenshots/reports.png" alt="Reports view" loading="lazy" width="1280" height="800">
+          <img src="screenshots/reports.png" alt="Reports — bar chart of monthly spending with 3-month forecast and category donut chart" loading="lazy" width="1280" height="800">
           <figcaption>Reports &mdash; spending history, forecast, and category breakdown</figcaption>
         </figure>
         <figure class="screenshot-mobile">
-          <img src="screenshots/mobile.png" alt="Mobile view" loading="lazy" width="390" height="844">
+          <img src="screenshots/mobile.png" alt="Mobile checklist — task list on a small screen with touch-friendly controls" loading="lazy" width="390" height="844">
           <figcaption>Mobile &mdash; touch-friendly, works on any device</figcaption>
         </figure>
       </div>
@@ -132,7 +133,7 @@
       <h2>Up and running in under a minute</h2>
       <p class="install-sub">Requires Docker with Compose v2 (<code>docker compose</code>).</p>
       <div class="code-block">
-        <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
+        <button class="copy-btn" aria-label="Copy install command">Copy</button>
         <pre><code>git clone https://github.com/lucaslra/Montly.git
 cd Montly
 docker compose up -d</code></pre>
@@ -147,7 +148,7 @@ docker compose up -d</code></pre>
       <div class="install-alt">
         <span class="install-alt-label">Or pull the pre-built image:</span>
         <div class="code-block">
-          <button class="copy-btn" aria-label="Copy to clipboard">Copy</button>
+          <button class="copy-btn" aria-label="Copy Docker pull command">Copy</button>
           <pre><code>docker pull ghcr.io/lucaslra/montly:latest</code></pre>
         </div>
       </div>
@@ -168,8 +169,8 @@ docker compose up -d</code></pre>
           <span>Plain CSS &middot; hooks pattern &middot; no UI framework</span>
         </div>
         <div class="stack-item">
-          <strong>SQLite</strong>
-          <span>WAL mode &middot; foreign keys &middot; parameterised queries &middot; pure Go (no CGO)</span>
+          <strong>SQLite / PostgreSQL</strong>
+          <span>SQLite by default (WAL mode, pure Go, no CGO) &middot; PostgreSQL also supported via <code>DB_TYPE=postgres</code></span>
         </div>
         <div class="stack-item">
           <strong>Docker</strong>
@@ -197,14 +198,24 @@ docker compose up -d</code></pre>
     </div>
   </footer>
 
+  <span id="copy-status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></span>
   <script>
+    var copyStatus = document.getElementById('copy-status');
     document.querySelectorAll('.copy-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var code = btn.parentElement.querySelector('code').textContent;
         navigator.clipboard.writeText(code).then(function() {
           btn.textContent = 'Copied!';
           btn.classList.add('copied');
-          setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+          copyStatus.textContent = 'Copied to clipboard';
+          setTimeout(function() {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+            copyStatus.textContent = '';
+          }, 1500);
+        }).catch(function() {
+          btn.textContent = 'Failed';
+          setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
         });
       });
     });
