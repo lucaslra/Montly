@@ -14,6 +14,8 @@ vi.mock('../api.js', () => ({
   createTask:               vi.fn(),
   updateTask:               vi.fn(),
   deleteTask:               vi.fn(),
+  archiveTask:              vi.fn(),
+  unarchiveTask:            vi.fn(),
   uploadCompletionReceipt:  vi.fn(),
   deleteCompletionReceipt:  vi.fn(),
   patchCompletion:          vi.fn(),
@@ -163,17 +165,17 @@ describe('App optimistic toggle', () => {
 // ── Toast notifications ───────────────────────────────────────────────────────
 
 describe('App toast notifications', () => {
-  it('shows "Task deleted" toast after confirming a deletion in ManageView', async () => {
+  it('shows "Task archived" toast after confirming an archive in ManageView', async () => {
     const task = { id: 3, title: 'Rent', type: 'bill', metadata: {}, start_date: '', end_date: '', interval: 1 }
-    api.deleteTask.mockResolvedValue(null)
+    api.archiveTask.mockResolvedValue(null)
     await renderAuth([task], [])
 
     await userEvent.click(screen.getByRole('button', { name: 'Manage' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Delete' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Archive' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
     await userEvent.click(screen.getByRole('button', { name: 'Yes' }))
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent('Task deleted')
+      expect(screen.getByRole('status')).toHaveTextContent('Task archived')
     )
   })
 })
@@ -183,12 +185,12 @@ describe('App toast notifications', () => {
 describe('App error handling', () => {
   it('shows an error banner when a non-401 API error occurs', async () => {
     const task = { id: 3, title: 'Rent', type: 'bill', metadata: {}, start_date: '', end_date: '', interval: 1 }
-    api.deleteTask.mockRejectedValue(Object.assign(new Error('internal server error'), { status: 500 }))
+    api.archiveTask.mockRejectedValue(Object.assign(new Error('internal server error'), { status: 500 }))
     await renderAuth([task], [])
 
     await userEvent.click(screen.getByRole('button', { name: 'Manage' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Delete' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Archive' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
     await userEvent.click(screen.getByRole('button', { name: 'Yes' }))
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('internal server error')
@@ -197,12 +199,12 @@ describe('App error handling', () => {
 
   it('dismisses the error banner when the close button is clicked', async () => {
     const task = { id: 3, title: 'Rent', type: 'bill', metadata: {}, start_date: '', end_date: '', interval: 1 }
-    api.deleteTask.mockRejectedValue(Object.assign(new Error('oops'), { status: 500 }))
+    api.archiveTask.mockRejectedValue(Object.assign(new Error('oops'), { status: 500 }))
     await renderAuth([task], [])
 
     await userEvent.click(screen.getByRole('button', { name: 'Manage' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Delete' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Archive' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
     await userEvent.click(screen.getByRole('button', { name: 'Yes' }))
     await waitFor(() => screen.getByRole('alert'))
     await userEvent.click(screen.getByLabelText('Dismiss error'))

@@ -57,6 +57,15 @@ export const updateTask = (id, title, description, type, metadata, startDate, en
 export const deleteTask = (id) =>
   request(`/tasks/${id}`, { method: 'DELETE' })
 
+export const archiveTask = (id) =>
+  request(`/tasks/${id}/archive`, { method: 'PATCH' })
+
+export const unarchiveTask = (id) =>
+  request(`/tasks/${id}/unarchive`, { method: 'PATCH' })
+
+export const fetchArchivedTasks = () =>
+  request('/tasks/archived')
+
 export const fetchReport = (anchor) =>
   request(`/report?anchor=${encodeURIComponent(anchor)}`)
 

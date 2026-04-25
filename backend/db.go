@@ -57,6 +57,7 @@ type Task struct {
 	EndDate     string          `json:"end_date"`
 	UserID      int64           `json:"user_id"`
 	Interval    int             `json:"interval"`
+	ArchivedAt  *string         `json:"archived_at,omitempty"`
 }
 
 type Completion struct {
@@ -217,8 +218,9 @@ func migratePostgres(db *sql.DB) error {
 			secret     TEXT    NOT NULL DEFAULT '',
 			created_at TEXT    NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		)`,
-		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_id   BIGINT   REFERENCES users(id)`,
-		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS interval  INTEGER  NOT NULL DEFAULT 1`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_id     BIGINT   REFERENCES users(id)`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS interval    INTEGER  NOT NULL DEFAULT 1`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS archived_at TEXT`,
 		`CREATE INDEX IF NOT EXISTS idx_completions_task_month ON completions(task_id, month)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`,
@@ -293,6 +295,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE tasks ADD COLUMN end_date    TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN user_id     INTEGER REFERENCES users(id)`,
 		`ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE tasks ADD COLUMN archived_at TEXT`,
 		`ALTER TABLE completions ADD COLUMN receipt_file TEXT    NOT NULL DEFAULT ''`,
 		`ALTER TABLE completions ADD COLUMN amount       TEXT    NOT NULL DEFAULT ''`,
 		`ALTER TABLE completions ADD COLUMN note         TEXT    NOT NULL DEFAULT ''`,
@@ -332,11 +335,12 @@ func migrate(db *sql.DB) error {
 			start_date  TEXT,
 			end_date    TEXT,
 			user_id     INTEGER REFERENCES users(id),
-			interval    INTEGER NOT NULL DEFAULT 1
+			interval    INTEGER NOT NULL DEFAULT 1,
+			archived_at TEXT
 		)`); err != nil {
 			return fmt.Errorf("create tasks: %w", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO tasks SELECT id,title,description,type,metadata,created_at,NULLIF(start_date,''),NULLIF(end_date,''),user_id,COALESCE(interval,1) FROM tasks_old`); err != nil {
+		if _, err := tx.Exec(`INSERT INTO tasks SELECT id,title,description,type,metadata,created_at,NULLIF(start_date,''),NULLIF(end_date,''),user_id,COALESCE(interval,1),NULL FROM tasks_old`); err != nil {
 			return fmt.Errorf("migrate tasks data: %w", err)
 		}
 		if _, err := tx.Exec(`DROP TABLE tasks_old`); err != nil {
@@ -540,14 +544,14 @@ func (db *DB) SaveSettings(userID int64, settings map[string]string) error {
 
 // ======== Tasks ========
 
-const taskColumns = `id, title, description, type, metadata, created_at, start_date, end_date, user_id, interval`
+const taskColumns = `id, title, description, type, metadata, created_at, start_date, end_date, user_id, interval, archived_at`
 
 func scanTask(row *sql.Row) (Task, error) {
 	var t Task
 	var meta string
 	var startDate, endDate *string
 	var userID *int64
-	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &userID, &t.Interval); err != nil {
+	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &userID, &t.Interval, &t.ArchivedAt); err != nil {
 		return Task{}, err
 	}
 	if meta == "" {
@@ -613,6 +617,7 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 		 WHERE COALESCE(NULLIF(start_date,''), `+db.ymExpr("created_at")+`) <= ?
 		   AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
 		   AND user_id = ?
+		   AND archived_at IS NULL
 		   AND `+db.intervalCheckExpr()+`
 		 ORDER BY created_at ASC`),
 		month, month, userID, monthIndex(month),
@@ -627,7 +632,7 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 		var meta string
 		var startDate, endDate *string
 		var uid *int64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt); err != nil {
 			return nil, err
 		}
 		if meta == "" {
@@ -687,7 +692,7 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 		var meta string
 		var startDate, endDate *string
 		var uid *int64
-		if err := taskRows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval); err != nil {
+		if err := taskRows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt); err != nil {
 			taskRows.Close()
 			return nil, fmt.Errorf("report task scan: %w", err)
 		}
@@ -750,8 +755,12 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 	}
 	result := make([]ReportMonth, 0, len(allMonths))
 	for _, m := range allMonths {
+		isForecast := isForecastSet[m]
 		monthTasks := []Task{}
 		for _, t := range allTasks {
+			if isForecast && t.ArchivedAt != nil {
+				continue
+			}
 			if taskActiveInMonth(t, m) {
 				monthTasks = append(monthTasks, t)
 			}
@@ -762,7 +771,7 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 		}
 		result = append(result, ReportMonth{
 			Month:       m,
-			IsForecast:  isForecastSet[m],
+			IsForecast:  isForecast,
 			Tasks:       monthTasks,
 			Completions: comps,
 		})
@@ -922,6 +931,56 @@ func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskTyp
 func (db *DB) DeleteTask(id int64) error {
 	_, err := db.Exec(db.q(`DELETE FROM tasks WHERE id = ?`), id)
 	return err
+}
+
+func (db *DB) ArchiveTask(id int64) error {
+	_, err := db.Exec(db.q(`UPDATE tasks SET archived_at = ? WHERE id = ?`),
+		time.Now().UTC().Format("2006-01-02T15:04:05Z"), id)
+	return err
+}
+
+func (db *DB) UnarchiveTask(id int64) error {
+	_, err := db.Exec(db.q(`UPDATE tasks SET archived_at = NULL WHERE id = ?`), id)
+	return err
+}
+
+func (db *DB) GetArchivedTasks(userID int64) ([]Task, error) {
+	rows, err := db.Query(
+		db.q(`SELECT `+taskColumns+` FROM tasks WHERE user_id = ? AND archived_at IS NOT NULL ORDER BY archived_at DESC`),
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tasks := []Task{}
+	for rows.Next() {
+		var t Task
+		var meta string
+		var startDate, endDate *string
+		var uid *int64
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt); err != nil {
+			return nil, err
+		}
+		if meta == "" {
+			meta = "{}"
+		}
+		t.Metadata = json.RawMessage(meta)
+		if startDate != nil {
+			t.StartDate = *startDate
+		}
+		if endDate != nil {
+			t.EndDate = *endDate
+		}
+		if uid != nil {
+			t.UserID = *uid
+		}
+		if t.Interval == 0 {
+			t.Interval = 1
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
 }
 
 // ======== Completions ========

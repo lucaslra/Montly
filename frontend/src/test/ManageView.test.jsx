@@ -26,6 +26,8 @@ function renderManage(tasks = [], extra = {}) {
     onCreate: vi.fn(),
     onUpdate: vi.fn(),
     onDelete: vi.fn(),
+    onArchive: vi.fn(),
+    onUnarchive: vi.fn(),
     ...extra,
   }
   const result = render(<ManageView {...props} />)
@@ -237,32 +239,32 @@ describe('ManageView', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  // ── Delete confirmation ────────────────────────────────────────────────────
+  // ── Archive confirmation ───────────────────────────────────────────────────
 
-  it('shows inline delete confirmation when Delete is clicked', async () => {
+  it('shows inline archive confirmation when Archive is clicked', async () => {
     renderManage([makeTask({ id: 1, title: 'Netflix' })])
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
-    expect(screen.getByText('Delete?')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
+    expect(screen.getByText('Archive?')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'No' })).toBeInTheDocument()
   })
 
-  it('calls onDelete when Yes is confirmed', async () => {
-    const onDelete = vi.fn()
-    renderManage([makeTask({ id: 42, title: 'Netflix' })], { onDelete })
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  it('calls onArchive when Yes is confirmed', async () => {
+    const onArchive = vi.fn()
+    renderManage([makeTask({ id: 42, title: 'Netflix' })], { onArchive })
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
     await userEvent.click(screen.getByRole('button', { name: 'Yes' }))
-    expect(onDelete).toHaveBeenCalledWith(42)
+    expect(onArchive).toHaveBeenCalledWith(42)
   })
 
-  it('dismisses confirmation without deleting when No is clicked', async () => {
-    const onDelete = vi.fn()
-    renderManage([makeTask({ id: 1, title: 'Netflix' })], { onDelete })
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  it('dismisses confirmation without archiving when No is clicked', async () => {
+    const onArchive = vi.fn()
+    renderManage([makeTask({ id: 1, title: 'Netflix' })], { onArchive })
+    await userEvent.click(screen.getByRole('button', { name: 'Archive' }))
     await userEvent.click(screen.getByRole('button', { name: 'No' }))
-    expect(onDelete).not.toHaveBeenCalled()
-    expect(screen.queryByText('Delete?')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+    expect(onArchive).not.toHaveBeenCalled()
+    expect(screen.queryByText('Archive?')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument()
   })
 
   it('only shows confirmation for the clicked task when multiple tasks exist', async () => {
@@ -271,12 +273,12 @@ describe('ManageView', () => {
       makeTask({ id: 2, title: 'Spotify' }),
     ]
     renderManage(tasks)
-    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' })
-    await userEvent.click(deleteButtons[0])
+    const archiveButtons = screen.getAllByRole('button', { name: 'Archive' })
+    await userEvent.click(archiveButtons[0])
     // Only one confirmation appears
-    expect(screen.getAllByText('Delete?')).toHaveLength(1)
-    // Second task still shows Edit/Delete
+    expect(screen.getAllByText('Archive?')).toHaveLength(1)
+    // Second task still shows Edit/Archive
     const secondItem = screen.getByText('Spotify').closest('li')
-    expect(within(secondItem).getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+    expect(within(secondItem).getByRole('button', { name: 'Archive' })).toBeInTheDocument()
   })
 })

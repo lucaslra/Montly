@@ -424,6 +424,51 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) ArchiveTask(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	task, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID)
+	if !ok {
+		return
+	}
+	if err := h.db.ArchiveTask(id); err != nil {
+		writeServerError(w, "failed to archive task", err)
+		return
+	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "archive", "task", id, task.Title)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) UnarchiveTask(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	task, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID)
+	if !ok {
+		return
+	}
+	if err := h.db.UnarchiveTask(id); err != nil {
+		writeServerError(w, "failed to unarchive task", err)
+		return
+	}
+	go h.db.InsertAuditLog(currentUser(r).UserID, "unarchive", "task", id, task.Title)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListArchivedTasks(w http.ResponseWriter, r *http.Request) {
+	tasks, err := h.db.GetArchivedTasks(currentUser(r).UserID)
+	if err != nil {
+		writeServerError(w, "failed to list archived tasks", err)
+		return
+	}
+	writeJSON(w, tasks)
+}
+
 // --- Completions ---
 
 func (h *Handler) ListCompletions(w http.ResponseWriter, r *http.Request) {

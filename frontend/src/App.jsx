@@ -10,6 +10,7 @@ import {
   fetchSettings, updateSettings,
   fetchTasks, fetchCompletions,
   toggleCompletion, skipCompletion, createTask, updateTask, deleteTask,
+  archiveTask, unarchiveTask,
   uploadCompletionReceipt, deleteCompletionReceipt, patchCompletion,
   fetchMe, logout, fetchSetupStatus,
 } from './api.js'
@@ -321,6 +322,25 @@ export default function App() {
     }
   }
 
+  async function handleArchive(id) {
+    try {
+      await archiveTask(id)
+      setTasks(prev => prev.filter(t => t.id !== id))
+      showToast('Task archived')
+    } catch (e) {
+      onApiError(e)
+    }
+  }
+
+  async function handleUnarchive(id) {
+    try {
+      await unarchiveTask(id)
+      showToast('Task restored')
+    } catch (e) {
+      onApiError(e)
+    }
+  }
+
   async function handleSaveSettings(newSettings) {
     try {
       const saved = await updateSettings(newSettings)
@@ -524,6 +544,8 @@ export default function App() {
             onCreate={handleCreate}
             onUpdate={handleUpdate}
             onDelete={handleDelete}
+            onArchive={handleArchive}
+            onUnarchive={handleUnarchive}
           />
         ) : view === 'report' ? (
           <ReportView

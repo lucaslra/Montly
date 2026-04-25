@@ -1267,6 +1267,8 @@ body {
 [data-theme="dark"] .btn-icon.btn-danger:hover {
   background: #3b1010;
 }
+[data-theme="dark"] .btn-icon.btn-warning       { color: #fbbf24; border-color: #78350f; }
+[data-theme="dark"] .btn-icon.btn-warning:hover { background: #1c1208; }
 [data-theme="dark"] .amount-confirm-btn:hover {
   background: #0d2b18;
 }
@@ -1339,6 +1341,31 @@ body {
 .manage-item.type-payment-item      { border-left: 3px solid var(--badge-payment-text); }
 .manage-item.type-subscription-item { border-left: 3px solid var(--badge-subscription-text); }
 .manage-item.type-bill-item         { border-left: 3px solid var(--badge-bill-text); }
+
+/* archive button style */
+.btn-icon.btn-warning       { color: #b45309; border-color: #fde68a; }
+.btn-icon.btn-warning:hover { background: #fffbeb; }
+
+/* archived tasks section */
+.archived-section { margin-top: 24px; }
+.archived-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--muted);
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.archived-toggle:hover { color: var(--text); }
+.archived-list { margin-top: 8px; }
+.archived-item {
+  opacity: 0.65;
+  border-left: 3px solid var(--border) !important;
+}
+.archived-item .manage-item-title { text-decoration: line-through; }
 
 /* ── Monetary summary ────────────────────────────── */
 .monetary-summary {

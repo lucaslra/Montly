@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.13.0] — 2026-04-25
+
+### Added
+- **Task archiving** — tasks can now be archived instead of hard-deleted. Archived tasks vanish from the active list and all month views; a collapsible "Archived tasks" section in Manage lets users restore them or delete permanently. Completion history and report chart data are preserved for archived tasks across all history months.
+
+### Changed
+- **Manage view delete flow** — the "Delete" button on active tasks is now "Archive" (with confirmation). Permanent deletion is only available for already-archived tasks.
+
 ## [0.12.0] — 2026-04-25
 
 ### Added

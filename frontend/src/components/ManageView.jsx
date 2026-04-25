@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import TaskForm from './TaskForm.jsx'
 import { formatAmount } from '../utils.js'
+import { fetchArchivedTasks, deleteTask } from '../api.js'
 
 const INTERVAL_LABELS = { 2: 'Bimestral', 3: 'Trimestral', 6: 'Semestral', 12: 'Annual' }
 function intervalLabel(n) { return INTERVAL_LABELS[n] ?? `Every ${n}m` }
 
-// fix 3: human-readable month label
 function fmtMonth(ym) {
   if (!ym) return ''
   const [year, m] = ym.split('-')
@@ -15,14 +15,27 @@ function fmtMonth(ym) {
 
 const TASK_TYPES = ['payment', 'subscription', 'bill', 'reminder']
 
-export default function ManageView({ tasks, currency = '$', numberFormat = 'en', onCreate, onUpdate, onDelete }) {
+export default function ManageView({ tasks, currency = '$', numberFormat = 'en', onCreate, onUpdate, onDelete, onArchive, onUnarchive }) {
   const [editing, setEditing] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(null) // fix 4: task id pending delete
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [confirmArchive, setConfirmArchive] = useState(null)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedTasks, setArchivedTasks] = useState([])
+  const [loadingArchived, setLoadingArchived] = useState(false)
+  const [confirmPermDelete, setConfirmPermDelete] = useState(null)
 
-  // fix 1: keep modal open on error (App re-throws)
+  useEffect(() => {
+    if (!showArchived) return
+    setLoadingArchived(true)
+    fetchArchivedTasks()
+      .then(setArchivedTasks)
+      .catch(() => {})
+      .finally(() => setLoadingArchived(false))
+  }, [showArchived])
+
   async function handleCreate(title, description, type, metadata, startDate, endDate, interval) {
     try {
       await onCreate(title, description, type, metadata, startDate, endDate, interval)
@@ -34,6 +47,19 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
     try {
       await onUpdate(editing.id, title, description, type, metadata, startDate, endDate, interval)
       setEditing(null)
+    } catch { /* error shown by App */ }
+  }
+
+  async function handleUnarchive(id) {
+    await onUnarchive(id)
+    setArchivedTasks(prev => prev.filter(t => t.id !== id))
+  }
+
+  async function handlePermDelete(id) {
+    try {
+      await onDelete(id)
+      setArchivedTasks(prev => prev.filter(t => t.id !== id))
+      setConfirmPermDelete(null)
     } catch { /* error shown by App */ }
   }
 
@@ -88,14 +114,12 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
           {visibleTasks.map(task => (
             <li
               key={task.id}
-              // fix 5: left accent for payment tasks
               className={`manage-item${['payment','subscription','bill'].includes(task.type) ? ` type-${task.type}-item` : ''}`}
             >
               <div className="manage-item-content">
                 <div className="manage-item-title-row">
                   <span className="manage-item-title">{task.title}</span>
                   {task.type && <span className={`type-badge type-${task.type}`}>{task.type}</span>}
-                  {/* fix 3: formatted date badges */}
                   {task.interval > 1 && <span className="interval-badge">{intervalLabel(task.interval)}</span>}
                   {task.start_date && <span className="end-date-badge">from {fmtMonth(task.start_date)}</span>}
                   {task.end_date   && <span className="end-date-badge">ends {fmtMonth(task.end_date)}</span>}
@@ -105,26 +129,25 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
               </div>
 
               <div className="manage-item-actions">
-                {/* fix 4: inline delete confirm */}
-                {confirmDelete === task.id ? (
+                {confirmArchive === task.id ? (
                   <div className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
-                    <span className="delete-confirm-label">Delete?</span>
+                    <span className="delete-confirm-label">Archive?</span>
                     <button
-                      className="btn-icon btn-danger"
-                      onClick={() => { onDelete(task.id); setConfirmDelete(null) }}
+                      className="btn-icon btn-warning"
+                      onClick={() => { onArchive(task.id); setConfirmArchive(null) }}
                     >
                       Yes
                     </button>
-                    <button className="btn-icon" onClick={() => setConfirmDelete(null)}>No</button>
+                    <button className="btn-icon" onClick={() => setConfirmArchive(null)}>No</button>
                   </div>
                 ) : (
                   <>
                     <button className="btn-icon" onClick={() => setEditing(task)}>Edit</button>
                     <button
-                      className="btn-icon btn-danger"
-                      onClick={() => setConfirmDelete(task.id)}
+                      className="btn-icon btn-warning"
+                      onClick={() => setConfirmArchive(task.id)}
                     >
-                      Delete
+                      Archive
                     </button>
                   </>
                 )}
@@ -133,6 +156,64 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
           ))}
         </ul>
       )}
+
+      <div className="archived-section">
+        <button
+          className="archived-toggle"
+          onClick={() => setShowArchived(prev => !prev)}
+          aria-expanded={showArchived}
+        >
+          {showArchived ? '▾' : '▸'} Archived tasks
+        </button>
+
+        {showArchived && (
+          loadingArchived ? (
+            <div className="empty">Loading…</div>
+          ) : archivedTasks.length === 0 ? (
+            <div className="empty">No archived tasks.</div>
+          ) : (
+            <ul className="manage-list archived-list">
+              {archivedTasks.map(task => (
+                <li key={task.id} className="manage-item archived-item">
+                  <div className="manage-item-content">
+                    <div className="manage-item-title-row">
+                      <span className="manage-item-title">{task.title}</span>
+                      {task.type && <span className={`type-badge type-${task.type}`}>{task.type}</span>}
+                    </div>
+                    {task.description && <span className="manage-item-desc">{task.description}</span>}
+                    <TaskMeta task={task} currency={currency} numberFormat={numberFormat} />
+                  </div>
+
+                  <div className="manage-item-actions">
+                    {confirmPermDelete === task.id ? (
+                      <div className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
+                        <span className="delete-confirm-label">Delete permanently?</span>
+                        <button
+                          className="btn-icon btn-danger"
+                          onClick={() => handlePermDelete(task.id)}
+                        >
+                          Yes
+                        </button>
+                        <button className="btn-icon" onClick={() => setConfirmPermDelete(null)}>No</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button className="btn-icon" onClick={() => handleUnarchive(task.id)}>Restore</button>
+                        <button
+                          className="btn-icon btn-danger"
+                          onClick={() => setConfirmPermDelete(task.id)}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+      </div>
 
       {(adding || editing) && (
         <TaskForm
