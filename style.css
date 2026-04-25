@@ -70,6 +70,15 @@ code {
 .btn-ghost    { background: transparent; color: var(--text-muted); border: 2px solid var(--border); padding: .45rem 1rem; font-size: .875rem; }
 .btn-ghost:hover    { color: var(--text); border-color: var(--text-muted); }
 
+/* ── Focus styles ────────────────────────────────────────────── */
+.btn:focus-visible,
+.copy-btn:focus-visible,
+.nav-links a:focus-visible,
+.version-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 /* ── Nav ─────────────────────────────────────────────────────── */
 .nav {
   position: sticky;
@@ -406,7 +415,7 @@ figcaption {
     grid-template-columns: 1fr;
     gap: 40px;
   }
-  .hero-screenshot { order: -1; }
+  .hero-screenshot { order: 0; }
   .hero-screenshot img { max-width: 100%; }
 
   .screenshot-grid {
@@ -421,7 +430,7 @@ figcaption {
   }
 
   .nav-links { gap: 14px; }
-  .nav-links a:not(.btn) { font-size: .875rem; }
+  .nav-links a:not(.btn) { font-size: .875rem; padding: 10px 4px; }
 
   .footer-inner { flex-direction: column; align-items: flex-start; }
   .footer-links { gap: 16px; }

@@ -131,7 +131,7 @@
   <section class="install" id="install">
     <div class="container">
       <h2>Up and running in under a minute</h2>
-      <p class="install-sub">Requires Docker with Compose v2 (<code>docker compose</code>).</p>
+      <p class="install-sub">Requires Docker with Compose v2 (<code>docker compose</code>). SQLite is embedded — no database setup required.</p>
       <div class="code-block">
         <button class="copy-btn" aria-label="Copy install command">Copy</button>
         <pre><code>git clone https://github.com/lucaslra/Montly.git
@@ -199,26 +199,6 @@ docker compose up -d</code></pre>
   </footer>
 
   <span id="copy-status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></span>
-  <script>
-    var copyStatus = document.getElementById('copy-status');
-    document.querySelectorAll('.copy-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var code = btn.parentElement.querySelector('code').textContent;
-        navigator.clipboard.writeText(code).then(function() {
-          btn.textContent = 'Copied!';
-          btn.classList.add('copied');
-          copyStatus.textContent = 'Copied to clipboard';
-          setTimeout(function() {
-            btn.textContent = 'Copy';
-            btn.classList.remove('copied');
-            copyStatus.textContent = '';
-          }, 1500);
-        }).catch(function() {
-          btn.textContent = 'Failed';
-          setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
-        });
-      });
-    });
-  </script>
+  <script src="script.js" defer></script>
 </body>
 </html>
