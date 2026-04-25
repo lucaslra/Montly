@@ -15,7 +15,7 @@ Only the latest release receives security fixes. Running a recent image is stron
 A few properties of the current design that are relevant when assessing impact:
 
 - **Self-hosted only** — no central server; each deployment is isolated and operator-controlled.
-- **Session cookies** — `HttpOnly`, `SameSite=Lax`; set `SECURE_COOKIES=true` when serving over HTTPS (the default in production).
+- **Session cookies** — `HttpOnly`, `SameSite=Lax`; set `SECURE_COOKIES=true` when serving over HTTPS — required for the `Secure` cookie flag, HSTS header, and CSP `upgrade-insecure-requests`.
 - **Passwords** — stored as bcrypt hashes (cost 12).
 - **API tokens** — `mt_` prefixed, stored as SHA-256 hashes; never returned after creation.
 - **File uploads** — receipts are UUID-named, stored outside the web root, and served only to the owning user.

@@ -9,7 +9,7 @@ For anything beyond a small bug fix, open an issue first to discuss the change. 
 ## Setup
 
 ```bash
-git clone <repo>
+git clone https://github.com/lucaslra/Montly.git
 cd montly
 make setup          # go mod tidy + npm install (backend, frontend, and e2e)
 make dev-backend    # terminal 1 — Go API on :8080

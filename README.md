@@ -26,7 +26,9 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 - **Completion tracking** — mark tasks done per month, attach receipt files (PDF, image)
 - **Amount logging** — record the actual amount paid per completion
 - **Reports** — monthly spending bar chart with 6-month history and 3-month forecast, category donut chart, and stat cards (YTD/fiscal-year-to-date, monthly average, peak month, next forecast)
-- **Webhooks** — receive HTTP POST notifications on task completion and uncompletion
+- **Webhooks** — outbound HTTP POST on task completion, uncompletion, skip, and monthly digest; testable directly from the Settings panel
+- **Audit log** — append-only record of all completions, edits, deletes, user management, and token actions (admin only)
+- **CSV import & export** — bulk-export all completions; import from the same format to migrate or load historical data
 - **Multi-user** — isolated data per user; admin can create/delete accounts
 - **First-run setup** — create the admin account through the UI on first access; no env vars needed
 - **API tokens** — headless / mobile client access via `Bearer mt_…` tokens
@@ -113,15 +115,20 @@ GET    /api/auth/tokens
 POST   /api/auth/tokens
 DELETE /api/auth/tokens/:id
 
-GET    /api/webhooks                             — events: task.completed, task.uncompleted
+GET    /api/webhooks                             — events: task.completed, task.uncompleted, task.skipped, month.digest
 POST   /api/webhooks
 DELETE /api/webhooks/:id
+POST   /api/webhooks/:id/test
 
+GET    /api/report?anchor=YYYY-MM
+
+GET    /api/export/completions.csv
+POST   /api/import/completions.csv
+
+GET    /api/audit-logs                           — admin only
 GET    /api/users                                — admin only
 POST   /api/users                                — admin only
 DELETE /api/users/:id                            — admin only
-
-GET    /api/export/completions.csv
 ```
 
 Every response includes `X-API-Version: 1`.

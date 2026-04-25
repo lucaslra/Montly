@@ -102,6 +102,8 @@ server {
 
 Obtain a certificate with Certbot: `certbot --nginx -d montly.example.com`.
 
+> **Important:** nginx forwards `X-Forwarded-For`, but montly ignores it unless you also set `TRUST_PROXY_HEADERS: "true"` in the montly container's environment. Without it, the login rate limiter sees only the loopback IP and provides no per-user protection.
+
 ---
 
 ## PostgreSQL backend
@@ -210,6 +212,6 @@ All schema migrations are applied automatically on startup and are idempotent â€
 - [ ] Set `SECURE_COOKIES=true` when serving over HTTPS
 - [ ] Use HTTPS (Caddy or nginx + certbot)
 - [ ] Bind the container to `127.0.0.1:8080`, not `0.0.0.0:8080`
-- [ ] Pass real client IP via `X-Forwarded-For` so the login rate limiter works correctly
+- [ ] Pass real client IP via `X-Forwarded-For` and set `TRUST_PROXY_HEADERS=true` so the login rate limiter works correctly
 - [ ] Rotate admin password after first login
 - [ ] Keep the `DATA_DIR` volume backed up regularly
