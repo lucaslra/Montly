@@ -15,6 +15,7 @@ vi.mock('../api.js', () => ({
   fetchWebhooks:   vi.fn(),
   createWebhook:   vi.fn(),
   deleteWebhook:   vi.fn(),
+  testWebhook:     vi.fn(),
   fetchAuditLogs:  vi.fn(),
 }))
 
@@ -228,6 +229,92 @@ describe('SettingsView WebhooksSection', () => {
     await waitFor(() =>
       expect(screen.getByText('https://example.com/hook')).toBeInTheDocument()
     )
+  })
+
+  it('renders a Test button for each webhook', async () => {
+    const hook = { id: 1, url: 'https://example.com/hook', events: 'task.completed', created_at: '2026-04-01' }
+    api.fetchWebhooks.mockResolvedValue([hook])
+    render(<SettingsView settings={defaultSettings} onSave={vi.fn()} user={regularUser} />)
+    await waitFor(() => screen.getByText('https://example.com/hook'))
+    expect(screen.getByRole('button', { name: 'Test' })).toBeInTheDocument()
+  })
+
+  it('shows "Test delivered" after a successful test', async () => {
+    const hook = { id: 1, url: 'https://example.com/hook', events: 'task.completed', created_at: '2026-04-01' }
+    api.fetchWebhooks.mockResolvedValue([hook])
+    api.testWebhook.mockResolvedValue({ ok: true, status: 200 })
+    render(<SettingsView settings={defaultSettings} onSave={vi.fn()} user={regularUser} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Test' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Test' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Test delivered (HTTP 200)')
+    )
+  })
+
+  it('shows "Test failed" after a failed test response', async () => {
+    const hook = { id: 1, url: 'https://example.com/hook', events: 'task.completed', created_at: '2026-04-01' }
+    api.fetchWebhooks.mockResolvedValue([hook])
+    api.testWebhook.mockResolvedValue({ ok: false, status: 500 })
+    render(<SettingsView settings={defaultSettings} onSave={vi.fn()} user={regularUser} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Test' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Test' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Test failed: HTTP 500')
+    )
+  })
+
+  it('shows an error message when the test throws', async () => {
+    const hook = { id: 1, url: 'https://example.com/hook', events: 'task.completed', created_at: '2026-04-01' }
+    api.fetchWebhooks.mockResolvedValue([hook])
+    api.testWebhook.mockRejectedValue(new Error('connection refused'))
+    render(<SettingsView settings={defaultSettings} onSave={vi.fn()} user={regularUser} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Test' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Test' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Test failed: connection refused')
+    )
+  })
+})
+
+// ── AuditLogSection ───────────────────────────────────────────────────────────
+
+describe('SettingsView AuditLogSection', () => {
+  const makeLog = (id) => ({
+    id,
+    created_at: '2026-04-01T12:00:00Z',
+    username: 'admin',
+    action: 'complete',
+    entity_type: 'task',
+    entity_label: `Task ${id}`,
+  })
+
+  it('shows pagination controls when there are multiple pages', async () => {
+    const logs = Array.from({ length: 50 }, (_, i) => makeLog(i + 1))
+    api.fetchAuditLogs.mockResolvedValue({ logs, total: 100 })
+    render(<SettingsView settings={defaultSettings} onSave={vi.fn()} user={adminUser} />)
+    await waitFor(() => screen.getByText(/Page 1 of 2/))
+    expect(screen.getByRole('button', { name: '‹ Prev' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next ›' })).not.toBeDisabled()
+  })
+
+  it('keeps pagination visible when navigating to the next page', async () => {
+    const logs = Array.from({ length: 50 }, (_, i) => makeLog(i + 1))
+    api.fetchAuditLogs
+      .mockResolvedValueOnce({ logs, total: 100 })
+      .mockResolvedValueOnce({ logs, total: 100 })
+    render(<SettingsView settings={defaultSettings} onSave={vi.fn()} user={adminUser} />)
+    await waitFor(() => screen.getByText(/Page 1 of 2/))
+    await userEvent.click(screen.getByRole('button', { name: 'Next ›' }))
+    await waitFor(() => screen.getByText(/Page 2 of 2/))
+    expect(screen.getByRole('button', { name: 'Next ›' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '‹ Prev' })).not.toBeDisabled()
+  })
+
+  it('hides pagination when there is only one page', async () => {
+    const logs = Array.from({ length: 10 }, (_, i) => makeLog(i + 1))
+    api.fetchAuditLogs.mockResolvedValue({ logs, total: 10 })
+    render(<SettingsView settings={defaultSettings} onSave={vi.fn()} user={adminUser} />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: '‹ Prev' })).not.toBeInTheDocument())
   })
 })
 

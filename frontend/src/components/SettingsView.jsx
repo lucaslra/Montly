@@ -3,7 +3,7 @@ import {
   changePassword,
   fetchTokens, createToken, revokeToken,
   fetchUsers, createUser, deleteUser,
-  fetchWebhooks, createWebhook, deleteWebhook,
+  fetchWebhooks, createWebhook, deleteWebhook, testWebhook,
   fetchAuditLogs,
 } from '../api.js'
 import { formatAmount } from '../utils.js'
@@ -396,6 +396,8 @@ function WebhooksSection() {
   const [creating, setCreating] = useState(false)
   const [error,    setError]    = useState(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [testingId,   setTestingId]   = useState(null)
+  const [testResults, setTestResults] = useState({})
   const triggerRefs   = useRef({})
   const confirmYesRef = useRef(null)
   const prevConfirmId = useRef(null)
@@ -445,6 +447,19 @@ function WebhooksSection() {
       setHooks(prev => (prev ?? []).filter(h => h.id !== id))
     } catch (err) {
       setError(err.message ?? 'Failed to delete webhook')
+    }
+  }
+
+  async function handleTest(id) {
+    setTestingId(id)
+    setTestResults(prev => { const n = { ...prev }; delete n[id]; return n })
+    try {
+      const result = await testWebhook(id)
+      setTestResults(prev => ({ ...prev, [id]: result }))
+    } catch (err) {
+      setTestResults(prev => ({ ...prev, [id]: { ok: false, error: err.message } }))
+    } finally {
+      setTestingId(null)
     }
   }
 
@@ -513,6 +528,17 @@ function WebhooksSection() {
                 <span className="settings-list-meta">
                   {hook.events.split(',').join(' · ')} · Created {hook.created_at?.slice(0, 10)}
                 </span>
+                {testResults[hook.id] && (
+                  <span
+                    className="settings-list-meta"
+                    role="status"
+                    style={{ color: testResults[hook.id].ok ? 'var(--color-success, #22c55e)' : 'var(--color-error, #ef4444)' }}
+                  >
+                    {testResults[hook.id].ok
+                      ? `Test delivered (HTTP ${testResults[hook.id].status})`
+                      : `Test failed: ${testResults[hook.id].error ?? `HTTP ${testResults[hook.id].status}`}`}
+                  </span>
+                )}
               </div>
               {confirmDeleteId === hook.id ? (
                 <span className="delete-confirm" role="alert" aria-live="assertive" aria-atomic="true">
@@ -521,7 +547,16 @@ function WebhooksSection() {
                   <button className="btn-icon btn-sm" onClick={() => setConfirmDeleteId(null)}>No</button>
                 </span>
               ) : (
-                <button ref={el => { triggerRefs.current[hook.id] = el }} className="btn-danger btn-sm" onClick={() => setConfirmDeleteId(hook.id)}>Delete</button>
+                <>
+                  <button
+                    className="btn-secondary btn-sm"
+                    onClick={() => handleTest(hook.id)}
+                    disabled={testingId !== null}
+                  >
+                    {testingId === hook.id ? 'Testing…' : 'Test'}
+                  </button>
+                  <button ref={el => { triggerRefs.current[hook.id] = el }} className="btn-danger btn-sm" onClick={() => setConfirmDeleteId(hook.id)}>Delete</button>
+                </>
               )}
             </li>
           ))}
@@ -554,16 +589,19 @@ const ACTION_LABELS = {
 
 function AuditLogSection() {
   const [data,    setData]    = useState(null)  // { logs, total }
+  const [loading, setLoading] = useState(true)
   const [offset,  setOffset]  = useState(0)
   const [error,   setError]   = useState(null)
   const limit = 50
 
   useEffect(() => {
-    setData(null)
+    let active = true
+    setLoading(true)
     setError(null)
     fetchAuditLogs(limit, offset)
-      .then(setData)
-      .catch(err => setError(err.message))
+      .then(d => { if (active) { setData(d); setLoading(false) } })
+      .catch(err => { if (active) { setError(err.message); setLoading(false) } })
+    return () => { active = false }
   }, [offset])
 
   const total = data?.total ?? 0
@@ -575,54 +613,54 @@ function AuditLogSection() {
     <section className="settings-section-block">
       <h3 className="settings-section-title">Audit Log</h3>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {data === null && !error && <p className="settings-empty">Loading…</p>}
-      {data !== null && logs.length === 0 && (
+      {loading && <p className="settings-empty">Loading…</p>}
+      {!loading && logs.length === 0 && !error && (
         <p className="settings-empty">No activity recorded yet.</p>
       )}
-      {logs.length > 0 && (
-        <>
-          <div className="audit-log-scroll">
-            <table className="audit-log-table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>User</th>
-                  <th>Action</th>
-                  <th>Target</th>
+      {!loading && logs.length > 0 && (
+        <div className="audit-log-scroll">
+          <table className="audit-log-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>User</th>
+                <th>Action</th>
+                <th>Target</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map(log => (
+                <tr key={log.id}>
+                  <td className="audit-log-time">{log.created_at.slice(0, 16).replace('T', ' ')}</td>
+                  <td>{log.username}</td>
+                  <td>{ACTION_LABELS[log.action] ?? log.action}</td>
+                  <td className="audit-log-label">
+                    {log.entity_type}{log.entity_label ? `: ${log.entity_label}` : ''}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {logs.map(log => (
-                  <tr key={log.id}>
-                    <td className="audit-log-time">{log.created_at.slice(0, 16).replace('T', ' ')}</td>
-                    <td>{log.username}</td>
-                    <td>{ACTION_LABELS[log.action] ?? log.action}</td>
-                    <td className="audit-log-label">
-                      {log.entity_type}{log.entity_label ? `: ${log.entity_label}` : ''}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="audit-log-pagination">
-            <button
-              className="btn-secondary btn-sm"
-              onClick={() => setOffset(o => Math.max(0, o - limit))}
-              disabled={offset === 0}
-            >
-              ‹ Prev
-            </button>
-            <span>Page {page} of {pages} ({total} entries)</span>
-            <button
-              className="btn-secondary btn-sm"
-              onClick={() => setOffset(o => o + limit)}
-              disabled={offset + limit >= total}
-            >
-              Next ›
-            </button>
-          </div>
-        </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {pages > 1 && (
+        <div className="audit-log-pagination">
+          <button
+            className="btn-secondary btn-sm"
+            onClick={() => setOffset(o => Math.max(0, o - limit))}
+            disabled={offset === 0 || loading}
+          >
+            ‹ Prev
+          </button>
+          <span>Page {page} of {pages} ({total} entries)</span>
+          <button
+            className="btn-secondary btn-sm"
+            onClick={() => setOffset(o => o + limit)}
+            disabled={offset + limit >= total || loading}
+          >
+            Next ›
+          </button>
+        </div>
       )}
     </section>
   )

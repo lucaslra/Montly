@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { fetchTasks, fetchCompletions, exportCompletionsCSV, importCompletionsCSV } from '../api.js'
+import { fetchReport, exportCompletionsCSV, importCompletionsCSV } from '../api.js'
 import { formatAmount } from '../utils.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -223,33 +223,26 @@ export default function ReportView({ month, tasks, completionMap, currency, numb
   const cache = useRef(new Map())
 
   useEffect(() => {
-    const historyMonths  = Array.from({ length: 6 }, (_, i) => addMonths(month, -(6 - i)))
-    const forecastMonths = Array.from({ length: 3 }, (_, i) => addMonths(month, i + 1))
-
-    function fetchHistory(m) {
-      if (cache.current.has(`h:${m}`)) return Promise.resolve(cache.current.get(`h:${m}`))
-      return Promise.all([fetchTasks(m), fetchCompletions(m)]).then(([t, c]) => {
-        const entry = { month: m, tasks: t, cmap: new Map(c.map(x => [x.task_id, x])), isForecast: false }
-        cache.current.set(`h:${m}`, entry)
-        return entry
-      })
+    if (cache.current.has(month)) {
+      setMonthData(cache.current.get(month))
+      setLoading(false)
+      return
     }
-
-    function fetchForecast(m) {
-      if (cache.current.has(`f:${m}`)) return Promise.resolve(cache.current.get(`f:${m}`))
-      return fetchTasks(m).then(t => {
-        const entry = { month: m, tasks: t, cmap: new Map(), isForecast: true }
-        cache.current.set(`f:${m}`, entry)
-        return entry
+    setLoading(true)
+    setError(null)
+    fetchReport(month)
+      .then(({ months }) => {
+        const data = months.map(m => ({
+          month:      m.month,
+          tasks:      m.tasks,
+          cmap:       new Map(m.completions.map(c => [c.task_id, c])),
+          isForecast: m.is_forecast,
+        }))
+        cache.current.set(month, data)
+        setMonthData(data)
+        setLoading(false)
       })
-    }
-
-    Promise.all([
-      ...historyMonths.map(fetchHistory),
-      ...forecastMonths.map(fetchForecast),
-    ])
-      .then(data => { setMonthData(data); setLoading(false) })
-      .catch(e   => { setError(e.message); setLoading(false) })
+      .catch(e => { setError(e.message); setLoading(false) })
   }, [month])
 
   // Merge fetched months with the currently-loaded month (avoid duplicate fetch)

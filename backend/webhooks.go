@@ -137,6 +137,66 @@ func (h *WebhookHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *WebhookHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	hook, err := h.db.getWebhookByID(id)
+	if err != nil || hook.UserID != currentUser(r).UserID {
+		writeError(w, "webhook not found", http.StatusNotFound)
+		return
+	}
+
+	events := strings.Split(hook.Events, ",")
+	event := strings.TrimSpace(events[0])
+	now := time.Now().UTC().Format(time.RFC3339)
+	month := time.Now().UTC().Format("2006-01")
+
+	var body []byte
+	if event == "month.digest" {
+		body, _ = json.Marshal(digestPayload{
+			Event:       "month.digest",
+			Month:       month,
+			TaskCount:   1,
+			Tasks:       []digestTaskItem{{ID: 0, Title: "Test webhook from Montly", Type: "bill", Amount: "42.00"}},
+			TotalAmount: "42.00",
+			Timestamp:   now,
+		})
+	} else {
+		body, _ = json.Marshal(webhookPayload{
+			Event:     event,
+			TaskID:    0,
+			TaskTitle: "Test webhook from Montly",
+			Month:     month,
+			Timestamp: now,
+		})
+	}
+
+	req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": fmt.Sprintf("invalid URL: %v", err)})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Montly-Webhook/1")
+	if hook.Secret != "" {
+		mac := hmac.New(sha256.New, []byte(hook.Secret))
+		mac.Write(body)
+		req.Header.Set("X-Montly-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	resp.Body.Close()
+	writeJSON(w, map[string]any{"ok": resp.StatusCode < 400, "status": resp.StatusCode})
+}
+
 // ── Firing ────────────────────────────────────────────────────────────────────
 
 type webhookPayload struct {

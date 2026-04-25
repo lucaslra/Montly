@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.12.0] — 2026-04-25
+
+### Added
+- **Webhook test button** — each webhook in Settings → Webhooks now has a "Test" button that fires an immediate synchronous delivery using real payload format (task event or digest, depending on subscribed events). The result (`Test delivered HTTP 200` or `Test failed: …`) is shown inline without leaving the page.
+- **`GET /api/report` endpoint** — single endpoint replaces 15 parallel-but-serialized per-month requests. Returns 6 months of history + 3 months of forecast in one response using two DB queries; frontend caches by anchor month.
+
+### Fixed
+- **Audit log pagination** — navigating between pages hid the Prev/Next controls because the logs array was cleared to `null` mid-transition. Controls now stay visible while the next page loads; buttons are disabled during in-flight requests instead of disappearing.
+- **Report page load time** — SQLite's single writer connection caused all parallel per-month requests to serialize server-side, producing 2–4 s loads even with little data. The new `/api/report` endpoint eliminates the round-trips entirely.
+
 ## [0.11.0] — 2026-04-24
 
 ### Added

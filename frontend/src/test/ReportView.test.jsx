@@ -5,16 +5,14 @@ import ReportView from '../components/ReportView.jsx'
 import * as api from '../api.js'
 
 vi.mock('../api.js', () => ({
-  fetchTasks:            vi.fn(),
-  fetchCompletions:      vi.fn(),
+  fetchReport:           vi.fn(),
   exportCompletionsCSV:  vi.fn(),
   importCompletionsCSV:  vi.fn(),
 }))
 
 beforeEach(() => {
   // History (6 months) + forecast (3 months) are all empty by default
-  api.fetchTasks.mockResolvedValue([])
-  api.fetchCompletions.mockResolvedValue([])
+  api.fetchReport.mockResolvedValue({ months: [] })
 
   // jsdom stubs for export download path
   URL.createObjectURL = vi.fn().mockReturnValue('blob:fake-url')
@@ -48,13 +46,13 @@ function makeMoneyTask(id, amount) {
 
 describe('ReportView loading and error states', () => {
   it('shows a loading indicator while history is being fetched', () => {
-    api.fetchTasks.mockReturnValue(new Promise(() => {})) // never resolves
+    api.fetchReport.mockReturnValue(new Promise(() => {})) // never resolves
     renderReport()
     expect(screen.getByText('Loading report…')).toBeInTheDocument()
   })
 
   it('shows an error banner when the history fetch fails', async () => {
-    api.fetchTasks.mockRejectedValue(new Error('network failure'))
+    api.fetchReport.mockRejectedValue(new Error('network failure'))
     renderReport()
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('network failure')

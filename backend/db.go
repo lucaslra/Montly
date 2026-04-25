@@ -69,6 +69,13 @@ type Completion struct {
 	Skipped     bool   `json:"skipped"`
 }
 
+type ReportMonth struct {
+	Month       string       `json:"month"`
+	IsForecast  bool         `json:"is_forecast"`
+	Tasks       []Task       `json:"tasks"`
+	Completions []Completion `json:"completions"`
+}
+
 type AuditLog struct {
 	ID          int64  `json:"id"`
 	UserID      int64  `json:"user_id"`
@@ -379,6 +386,7 @@ func migrate(db *sql.DB) error {
 	}
 
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_completions_task_month ON completions(task_id, month)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_completions_month ON completions(month)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`)
@@ -572,6 +580,26 @@ func monthIndex(month string) int {
 	return year*12 + mon - 1
 }
 
+// taskActiveInMonth reports whether t is scheduled for the given YYYY-MM month,
+// replicating the same logic used in the GetTasks SQL WHERE clause.
+func taskActiveInMonth(t Task, month string) bool {
+	es := t.StartDate
+	if es == "" && len(t.CreatedAt) >= 7 {
+		es = t.CreatedAt[:7]
+	}
+	if es > month {
+		return false
+	}
+	if t.EndDate != "" && t.EndDate < month {
+		return false
+	}
+	interval := t.Interval
+	if interval <= 0 {
+		interval = 1
+	}
+	return (monthIndex(month)-monthIndex(es))%interval == 0
+}
+
 // intervalCheckExpr returns a SQL expression that is true when the query month
 // falls on a recurring interval anchored at the task's effective start date.
 func (db *DB) intervalCheckExpr() string {
@@ -625,6 +653,121 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 
 func (db *DB) GetTaskByID(id int64) (Task, error) {
 	return scanTask(db.QueryRow(db.q(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`), id))
+}
+
+// GetReportData fetches tasks and completions for the given history and forecast months
+// using two database queries, then groups the results per month in memory.
+// historyMonths and forecastMonths must be sorted ascending YYYY-MM strings.
+func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string) ([]ReportMonth, error) {
+	allMonths := make([]string, 0, len(historyMonths)+len(forecastMonths))
+	allMonths = append(allMonths, historyMonths...)
+	allMonths = append(allMonths, forecastMonths...)
+	if len(allMonths) == 0 {
+		return []ReportMonth{}, nil
+	}
+	minMonth := allMonths[0]
+	maxMonth := allMonths[len(allMonths)-1]
+
+	// 1. All tasks potentially active in [minMonth, maxMonth].
+	es := "COALESCE(NULLIF(start_date,''), " + db.ymExpr("created_at") + ")"
+	taskRows, err := db.Query(
+		db.q(`SELECT `+taskColumns+` FROM tasks
+		 WHERE `+es+` <= ?
+		   AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
+		   AND user_id = ?
+		 ORDER BY created_at ASC`),
+		maxMonth, minMonth, userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("report tasks query: %w", err)
+	}
+	var allTasks []Task
+	for taskRows.Next() {
+		var t Task
+		var meta string
+		var startDate, endDate *string
+		var uid *int64
+		if err := taskRows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval); err != nil {
+			taskRows.Close()
+			return nil, fmt.Errorf("report task scan: %w", err)
+		}
+		if meta == "" {
+			meta = "{}"
+		}
+		t.Metadata = json.RawMessage(meta)
+		if startDate != nil {
+			t.StartDate = *startDate
+		}
+		if endDate != nil {
+			t.EndDate = *endDate
+		}
+		if uid != nil {
+			t.UserID = *uid
+		}
+		if t.Interval == 0 {
+			t.Interval = 1
+		}
+		allTasks = append(allTasks, t)
+	}
+	if err := taskRows.Err(); err != nil {
+		taskRows.Close()
+		return nil, fmt.Errorf("report task rows: %w", err)
+	}
+	taskRows.Close()
+
+	// 2. Completions for the history range (forecast months have none yet).
+	compsByMonth := make(map[string][]Completion)
+	if len(historyMonths) > 0 {
+		compRows, err := db.Query(
+			db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note, c.skipped
+			 FROM completions c
+			 JOIN tasks t ON t.id = c.task_id
+			 WHERE c.month >= ? AND c.month <= ? AND t.user_id = ?`),
+			historyMonths[0], historyMonths[len(historyMonths)-1], userID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("report completions query: %w", err)
+		}
+		defer compRows.Close()
+		for compRows.Next() {
+			var c Completion
+			var skipped int
+			if err := compRows.Scan(&c.TaskID, &c.Month, &c.CompletedAt, &c.ReceiptFile, &c.Amount, &c.Note, &skipped); err != nil {
+				return nil, fmt.Errorf("report completion scan: %w", err)
+			}
+			c.Skipped = skipped != 0
+			compsByMonth[c.Month] = append(compsByMonth[c.Month], c)
+		}
+		if err := compRows.Err(); err != nil {
+			return nil, fmt.Errorf("report completion rows: %w", err)
+		}
+	}
+
+	// 3. Build per-month result, filtering tasks in Go using interval logic.
+	isForecastSet := make(map[string]bool, len(forecastMonths))
+	for _, m := range forecastMonths {
+		isForecastSet[m] = true
+	}
+	result := make([]ReportMonth, 0, len(allMonths))
+	for _, m := range allMonths {
+		monthTasks := []Task{}
+		for _, t := range allTasks {
+			if taskActiveInMonth(t, m) {
+				monthTasks = append(monthTasks, t)
+			}
+		}
+		comps := compsByMonth[m]
+		if comps == nil {
+			comps = []Completion{}
+		}
+		result = append(result, ReportMonth{
+			Month:       m,
+			IsForecast:  isForecastSet[m],
+			Tasks:       monthTasks,
+			Completions: comps,
+		})
+	}
+	return result, nil
 }
 
 func (db *DB) GetReceiptsForTask(taskID int64) ([]string, error) {

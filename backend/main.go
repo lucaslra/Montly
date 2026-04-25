@@ -193,6 +193,7 @@ func main() {
 			r.Get("/webhooks", wh.ListWebhooks)
 			r.Post("/webhooks", wh.CreateWebhook)
 			r.Delete("/webhooks/{id}", wh.DeleteWebhook)
+			r.Post("/webhooks/{id}/test", wh.TestWebhook)
 			mountAPI(r, h)
 
 			// Admin-only
@@ -255,6 +256,7 @@ func mountAPI(r chi.Router, h *Handler) {
 	r.Put("/tasks/{id}", h.UpdateTask)
 	r.Delete("/tasks/{id}", h.DeleteTask)
 	r.Get("/receipts/{filename}", h.ServeReceipt)
+	r.Get("/report", h.GetReport)
 	r.Get("/completions", h.ListCompletions)
 	r.Post("/completions/toggle", h.ToggleCompletion)
 	r.Post("/completions/skip", h.SkipCompletion)

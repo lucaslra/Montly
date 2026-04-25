@@ -61,6 +61,7 @@ func newTestServer(t *testing.T) *testServer {
 			r.Get("/webhooks", wh.ListWebhooks)
 			r.Post("/webhooks", wh.CreateWebhook)
 			r.Delete("/webhooks/{id}", wh.DeleteWebhook)
+			r.Post("/webhooks/{id}/test", wh.TestWebhook)
 			mountAPI(r, h)
 			r.Group(func(r chi.Router) {
 				r.Use(requireAdmin)

@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -140,6 +141,14 @@ func isValidYearMonth(s string) bool {
 	_, e1 := strconv.Atoi(s[:4])
 	m, e2 := strconv.Atoi(s[5:])
 	return e1 == nil && e2 == nil && m >= 1 && m <= 12
+}
+
+// addReportMonth shifts a YYYY-MM string by delta months.
+func addReportMonth(month string, delta int) string {
+	y, _ := strconv.Atoi(month[:4])
+	m, _ := strconv.Atoi(month[5:])
+	total := (y*12 + m - 1) + delta
+	return fmt.Sprintf("%04d-%02d", total/12, total%12+1)
 }
 
 // safeRemoveReceipt deletes a receipt file only if the filename is a valid UUID-based name.
@@ -433,6 +442,31 @@ func (h *Handler) ListCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, completions)
+}
+
+func (h *Handler) GetReport(w http.ResponseWriter, r *http.Request) {
+	anchor := r.URL.Query().Get("anchor")
+	if anchor == "" {
+		anchor = time.Now().Format("2006-01")
+	}
+	if !isValidYearMonth(anchor) {
+		writeError(w, "anchor must be YYYY-MM format", http.StatusBadRequest)
+		return
+	}
+	historyMonths := make([]string, 6)
+	for i := range historyMonths {
+		historyMonths[i] = addReportMonth(anchor, -(6 - i))
+	}
+	forecastMonths := make([]string, 3)
+	for i := range forecastMonths {
+		forecastMonths[i] = addReportMonth(anchor, i+1)
+	}
+	data, err := h.db.GetReportData(currentUser(r).UserID, historyMonths, forecastMonths)
+	if err != nil {
+		writeServerError(w, "failed to load report data", err)
+		return
+	}
+	writeJSON(w, map[string]any{"months": data})
 }
 
 func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {

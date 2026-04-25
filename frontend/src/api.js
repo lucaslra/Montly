@@ -57,6 +57,9 @@ export const updateTask = (id, title, description, type, metadata, startDate, en
 export const deleteTask = (id) =>
   request(`/tasks/${id}`, { method: 'DELETE' })
 
+export const fetchReport = (anchor) =>
+  request(`/report?anchor=${encodeURIComponent(anchor)}`)
+
 export const fetchCompletions = (month, signal) =>
   request(`/completions?month=${encodeURIComponent(month)}`, signal ? { signal } : {})
 
@@ -132,6 +135,9 @@ export const createWebhook = (url, events, secret) =>
   })
 export const deleteWebhook = (id) =>
   request(`/webhooks/${id}`, { method: 'DELETE' })
+
+export const testWebhook = (id) =>
+  request(`/webhooks/${id}/test`, { method: 'POST' })
 
 export const fetchAuditLogs = (limit = 50, offset = 0) =>
   request(`/audit-logs?limit=${limit}&offset=${offset}`)
