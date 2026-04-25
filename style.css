@@ -177,6 +177,7 @@ code {
 .hero-screenshot img {
   width: 100%;
   max-width: 600px;
+  height: auto;
   border-radius: 12px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
@@ -244,6 +245,7 @@ code {
 }
 .screenshot-grid img {
   width: 100%;
+  height: auto;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
@@ -258,6 +260,7 @@ code {
 .screenshot-mobile img {
   max-width: 280px;
   width: auto !important;
+  height: auto;
   border-radius: 18px;
 }
 .screenshot-mobile figcaption {
