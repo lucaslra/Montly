@@ -126,11 +126,20 @@ export function MonthPicker({ value, onChange, inline = false, label }) {
   )
 }
 
-export default function TaskForm({ task, currency = '$', onSave, onClose }) {
+function toLocalAmount(value, numberFormat) {
+  if (value == null || value === '') return ''
+  return numberFormat === 'eu' ? String(value).replace('.', ',') : String(value)
+}
+
+function fromLocalAmount(str, numberFormat) {
+  return numberFormat === 'eu' ? str.replace(',', '.') : str
+}
+
+export default function TaskForm({ task, currency = '$', numberFormat = 'en', onSave, onClose }) {
   const [title, setTitle] = useState(task?.title ?? '')
   const [description, setDescription] = useState(task?.description ?? '')
   const [type, setType] = useState(task?.type ?? '')
-  const [amount, setAmount] = useState(task?.metadata?.amount ?? '')
+  const [amount, setAmount] = useState(toLocalAmount(task?.metadata?.amount, numberFormat))
   const [startDate, setStartDate] = useState(task?.start_date ?? '')
   const [endDate, setEndDate] = useState(task?.end_date ?? '')
   const [interval, setInterval] = useState(task?.interval ?? 1)
@@ -182,14 +191,14 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
   }
 
   function buildMetadata() {
-    if (['payment', 'subscription', 'bill'].includes(type)) return { amount: amount.trim() }
+    if (['payment', 'subscription', 'bill'].includes(type)) return { amount: fromLocalAmount(amount.trim(), numberFormat) }
     return {}
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!title.trim()) return
-    if (amount.trim() !== '' && isNaN(Number(amount.trim()))) {
+    if (amount.trim() !== '' && isNaN(Number(fromLocalAmount(amount.trim(), numberFormat)))) {
       setAmountError('Amount must be a number')
       return
     }
@@ -267,7 +276,7 @@ export default function TaskForm({ task, currency = '$', onSave, onClose }) {
                     inputMode="decimal"
                     value={amount}
                     onChange={e => { setAmount(e.target.value); setAmountError('') }}
-                    placeholder="0.00"
+                    placeholder={numberFormat === 'eu' ? '0,00' : '0.00'}
                     className="input-with-prefix"
                     aria-describedby={amountError ? 'task-amount-error' : undefined}
                   />

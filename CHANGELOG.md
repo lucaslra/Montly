@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.14.0] — 2026-04-30
+
+### Fixed
+- **EU decimal separator in task amount field** — when the number format is set to EU (`1.234,56`), the Add/Edit Task dialog now accepts `,` as the decimal separator, shows `0,00` as placeholder, and normalises the value to a plain float before saving. Existing stored amounts are displayed with the correct separator when reopening the edit form.
+
 ## [0.13.0] — 2026-04-25
 
 ### Added

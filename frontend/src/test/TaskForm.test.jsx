@@ -90,6 +90,45 @@ describe('TaskForm', () => {
     })
   })
 
+  describe('EU number format', () => {
+    beforeEach(async () => {
+      renderForm({ numberFormat: 'eu' })
+      await userEvent.selectOptions(screen.getByLabelText(/Type/), 'payment')
+    })
+
+    it('shows 0,00 placeholder', () => {
+      expect(screen.getByLabelText(/Amount/)).toHaveAttribute('placeholder', '0,00')
+    })
+
+    it('accepts comma as decimal separator', async () => {
+      await userEvent.type(screen.getByLabelText('Title'), 'Rent')
+      await userEvent.type(screen.getByLabelText(/Amount/), '99,99')
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(screen.queryByText('Amount must be a number')).not.toBeInTheDocument()
+    })
+
+  })
+
+  describe('EU number format (isolated)', () => {
+    it('sends normalized amount to onSave', async () => {
+      const { onSave } = renderForm({ numberFormat: 'eu' })
+      await userEvent.selectOptions(screen.getByLabelText(/Type/), 'payment')
+      await userEvent.type(screen.getByLabelText('Title'), 'Rent')
+      await userEvent.type(screen.getByLabelText(/Amount/), '1234,56')
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(onSave).toHaveBeenCalled())
+      expect(onSave.mock.calls[0][3]).toEqual({ amount: '1234.56' })
+    })
+
+    it('initializes amount with comma when editing existing task', () => {
+      renderForm({
+        numberFormat: 'eu',
+        task: { title: 'Rent', description: '', type: 'payment', interval: 1, metadata: { amount: '500.50' }, start_date: '', end_date: '' },
+      })
+      expect(screen.getByLabelText(/Amount/)).toHaveValue('500,50')
+    })
+  })
+
   describe('form submission', () => {
     it('does not call onSave when title is empty', async () => {
       const { onSave } = renderForm()
