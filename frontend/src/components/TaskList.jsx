@@ -50,6 +50,11 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
               <div className="task-title-row">
                 <span className="task-title">{task.title}</span>
                 {task.type && <span className={`type-badge type-${task.type}`}>{task.type}</span>}
+                {task.is_shared && task.owner_name && (
+                  <span className="shared-by-badge" title={`Shared by ${task.owner_name}`}>
+                    shared by {task.owner_name}
+                  </span>
+                )}
                 {isSkipped ? (
                   <button
                     className="task-skip-btn task-skip-btn--active"

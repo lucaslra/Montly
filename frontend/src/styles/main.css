@@ -502,6 +502,7 @@ body {
 .manage-item {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px 16px;
   background: var(--surface);
@@ -1992,3 +1993,99 @@ body {
   flex-shrink: 0;
 }
 .btn-danger:hover { background: var(--danger); color: #fff; }
+
+/* ── Shared-by badge (task list) ─────────────────── */
+.shared-by-badge {
+  font-size: 0.6875rem;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  border-radius: 99px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+/* ── Share panel (ManageView) ────────────────────── */
+.share-panel {
+  flex-basis: 100%;
+  margin-top: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.share-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.share-panel-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.share-panel-loading,
+.share-panel-empty {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.share-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.share-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.share-username {
+  font-size: 0.875rem;
+  color: var(--text);
+}
+.share-search {
+  position: relative;
+}
+.share-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.share-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.share-result-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  font-size: 0.875rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.share-result-btn:hover { background: var(--border); }

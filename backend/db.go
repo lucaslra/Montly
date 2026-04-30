@@ -46,6 +46,11 @@ func (db *DB) ymExpr(col string) string {
 
 // ======== Types ========
 
+type SharedUser struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+}
+
 type Task struct {
 	ID          int64           `json:"id"`
 	Title       string          `json:"title"`
@@ -58,6 +63,9 @@ type Task struct {
 	UserID      int64           `json:"user_id"`
 	Interval    int             `json:"interval"`
 	ArchivedAt  *string         `json:"archived_at,omitempty"`
+	SharedWith  []SharedUser    `json:"shared_with,omitempty"`
+	IsShared    bool            `json:"is_shared,omitempty"`
+	OwnerName   string          `json:"owner_name,omitempty"`
 }
 
 type Completion struct {
@@ -225,6 +233,12 @@ func migratePostgres(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`,
+		`CREATE TABLE IF NOT EXISTS task_shares (
+			task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			PRIMARY KEY (task_id, user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_shares_user_id ON task_shares(user_id)`,
 	}
 	for _, s := range statements {
 		if _, err := db.Exec(s); err != nil {
@@ -394,6 +408,12 @@ func migrate(db *sql.DB) error {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS task_shares (
+		task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		PRIMARY KEY (task_id, user_id)
+	)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_shares_user_id ON task_shares(user_id)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS audit_logs (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id      INTEGER NOT NULL,
@@ -607,21 +627,41 @@ func taskActiveInMonth(t Task, month string) bool {
 // intervalCheckExpr returns a SQL expression that is true when the query month
 // falls on a recurring interval anchored at the task's effective start date.
 func (db *DB) intervalCheckExpr() string {
-	es := "COALESCE(NULLIF(start_date,''), " + db.ymExpr("created_at") + ")"
-	return "(? - (CAST(SUBSTR(" + es + ", 1, 4) AS INTEGER) * 12 + CAST(SUBSTR(" + es + ", 6, 2) AS INTEGER) - 1)) % interval = 0"
+	return db.intervalCheckExprForAlias("")
+}
+
+func (db *DB) intervalCheckExprForAlias(alias string) string {
+	p := ""
+	if alias != "" {
+		p = alias + "."
+	}
+	es := "COALESCE(NULLIF(" + p + "start_date,''), " + db.ymExpr(p+"created_at") + ")"
+	return "(? - (CAST(SUBSTR(" + es + ", 1, 4) AS INTEGER) * 12 + CAST(SUBSTR(" + es + ", 6, 2) AS INTEGER) - 1)) % " + p + "interval = 0"
 }
 
 func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
-	rows, err := db.Query(
-		db.q(`SELECT `+taskColumns+` FROM tasks
-		 WHERE COALESCE(NULLIF(start_date,''), `+db.ymExpr("created_at")+`) <= ?
-		   AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
-		   AND user_id = ?
-		   AND archived_at IS NULL
-		   AND `+db.intervalCheckExpr()+`
-		 ORDER BY created_at ASC`),
-		month, month, userID, monthIndex(month),
-	)
+	mi := monthIndex(month)
+	es := "COALESCE(NULLIF(start_date,''), " + db.ymExpr("created_at") + ")"
+	esT := "COALESCE(NULLIF(t.start_date,''), " + db.ymExpr("t.created_at") + ")"
+	query := `SELECT id, title, description, type, metadata, created_at, start_date, end_date, user_id, interval, archived_at, 0 AS is_shared, '' AS owner_name
+		FROM tasks
+		WHERE ` + es + ` <= ?
+		  AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
+		  AND user_id = ?
+		  AND archived_at IS NULL
+		  AND ` + db.intervalCheckExpr() + `
+		UNION
+		SELECT t.id, t.title, t.description, t.type, t.metadata, t.created_at, t.start_date, t.end_date, t.user_id, t.interval, t.archived_at, 1 AS is_shared, u.username AS owner_name
+		FROM tasks t
+		JOIN task_shares ts ON ts.task_id = t.id
+		JOIN users u ON u.id = t.user_id
+		WHERE ` + esT + ` <= ?
+		  AND (t.end_date IS NULL OR t.end_date = '' OR t.end_date >= ?)
+		  AND ts.user_id = ?
+		  AND t.archived_at IS NULL
+		  AND ` + db.intervalCheckExprForAlias("t") + `
+		ORDER BY created_at ASC`
+	rows, err := db.Query(db.q(query), month, month, userID, mi, month, month, userID, mi)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +672,9 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 		var meta string
 		var startDate, endDate *string
 		var uid *int64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt); err != nil {
+		var isSharedInt int
+		var ownerName string
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt, &isSharedInt, &ownerName); err != nil {
 			return nil, err
 		}
 		if meta == "" {
@@ -651,6 +693,8 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 		if t.Interval == 0 {
 			t.Interval = 1
 		}
+		t.IsShared = isSharedInt != 0
+		t.OwnerName = ownerName
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
@@ -673,15 +717,15 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 	minMonth := allMonths[0]
 	maxMonth := allMonths[len(allMonths)-1]
 
-	// 1. All tasks potentially active in [minMonth, maxMonth].
+	// 1. All tasks potentially active in [minMonth, maxMonth] — owned or shared.
 	es := "COALESCE(NULLIF(start_date,''), " + db.ymExpr("created_at") + ")"
 	taskRows, err := db.Query(
 		db.q(`SELECT `+taskColumns+` FROM tasks
 		 WHERE `+es+` <= ?
 		   AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
-		   AND user_id = ?
+		   AND (user_id = ? OR EXISTS (SELECT 1 FROM task_shares WHERE task_id = tasks.id AND user_id = ?))
 		 ORDER BY created_at ASC`),
-		maxMonth, minMonth, userID,
+		maxMonth, minMonth, userID, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("report tasks query: %w", err)
@@ -727,8 +771,9 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 			db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note, c.skipped
 			 FROM completions c
 			 JOIN tasks t ON t.id = c.task_id
-			 WHERE c.month >= ? AND c.month <= ? AND t.user_id = ?`),
-			historyMonths[0], historyMonths[len(historyMonths)-1], userID,
+			 WHERE c.month >= ? AND c.month <= ?
+			   AND (t.user_id = ? OR EXISTS (SELECT 1 FROM task_shares WHERE task_id = t.id AND user_id = ?))`),
+			historyMonths[0], historyMonths[len(historyMonths)-1], userID, userID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("report completions query: %w", err)
@@ -998,14 +1043,14 @@ func scanCompletion(row *sql.Row) (Completion, bool, error) {
 	return c, err == nil, err
 }
 
-// GetCompletions returns completions for a given month that belong to the user (via task ownership).
+// GetCompletions returns completions for a given month that the user can access (owned or shared tasks).
 func (db *DB) GetCompletions(month string, userID int64) ([]Completion, error) {
 	rows, err := db.Query(
 		db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note, c.skipped
 		 FROM completions c
 		 JOIN tasks t ON t.id = c.task_id
-		 WHERE c.month = ? AND t.user_id = ?`),
-		month, userID,
+		 WHERE c.month = ? AND (t.user_id = ? OR EXISTS (SELECT 1 FROM task_shares WHERE task_id = t.id AND user_id = ?))`),
+		month, userID, userID,
 	)
 	if err != nil {
 		return nil, err
@@ -1486,15 +1531,88 @@ func (db *DB) UpdateTokenLastUsed(id int64) {
 	}
 }
 
+// ======== Task Shares ========
+
+func (db *DB) AddShare(taskID, sharedWithUserID int64) error {
+	var q string
+	if db.driver == "postgres" {
+		q = db.q(`INSERT INTO task_shares (task_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING`)
+	} else {
+		q = `INSERT OR IGNORE INTO task_shares (task_id, user_id) VALUES (?, ?)`
+	}
+	_, err := db.Exec(q, taskID, sharedWithUserID)
+	return err
+}
+
+func (db *DB) RemoveShare(taskID, sharedWithUserID int64) error {
+	_, err := db.Exec(db.q(`DELETE FROM task_shares WHERE task_id = ? AND user_id = ?`), taskID, sharedWithUserID)
+	return err
+}
+
+func (db *DB) IsSharedWith(taskID, userID int64) (bool, error) {
+	var n int
+	err := db.QueryRow(db.q(`SELECT COUNT(*) FROM task_shares WHERE task_id = ? AND user_id = ?`), taskID, userID).Scan(&n)
+	return n > 0, err
+}
+
+func (db *DB) GetSharesForTask(taskID int64) ([]SharedUser, error) {
+	rows, err := db.Query(
+		db.q(`SELECT u.id, u.username FROM task_shares ts JOIN users u ON u.id = ts.user_id WHERE ts.task_id = ? ORDER BY u.username ASC`),
+		taskID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var shares []SharedUser
+	for rows.Next() {
+		var s SharedUser
+		if err := rows.Scan(&s.ID, &s.Username); err != nil {
+			return nil, err
+		}
+		shares = append(shares, s)
+	}
+	return shares, rows.Err()
+}
+
+// LookupUsers returns users whose username contains the search string (case-insensitive),
+// excluding the given user. Used for the share-task autocomplete.
+func (db *DB) LookupUsers(query string, excludeUserID int64) ([]SharedUser, error) {
+	var pattern string
+	if db.driver == "postgres" {
+		pattern = "%" + strings.ToLower(query) + "%"
+	} else {
+		pattern = "%" + strings.ToLower(query) + "%"
+	}
+	rows, err := db.Query(
+		db.q(`SELECT id, username FROM users WHERE lower(username) LIKE ? AND id != ? ORDER BY username ASC LIMIT 20`),
+		pattern, excludeUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []SharedUser
+	for rows.Next() {
+		var u SharedUser
+		if err := rows.Scan(&u.ID, &u.Username); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 // ReceiptBelongsToUser checks that the given receipt file is attached to a completion
-// whose task is owned by userID. Used to authorise GET /receipts/{filename}.
+// whose task is accessible by userID (owned or shared).
 func (db *DB) ReceiptBelongsToUser(filename string, userID int64) (bool, error) {
 	var n int
 	err := db.QueryRow(
 		db.q(`SELECT COUNT(*) FROM completions c
 		      JOIN tasks t ON t.id = c.task_id
-		      WHERE c.receipt_file = ? AND t.user_id = ?`),
-		filename, userID,
+		      WHERE c.receipt_file = ?
+		        AND (t.user_id = ? OR EXISTS (SELECT 1 FROM task_shares WHERE task_id = t.id AND user_id = ?))`),
+		filename, userID, userID,
 	).Scan(&n)
 	return n > 0, err
 }

@@ -106,6 +106,32 @@ func (h *Handler) taskOwnerCheck(w http.ResponseWriter, taskID, userID int64) (T
 	return task, true
 }
 
+// taskAccessCheck loads the task and returns it if userID owns it or is a shared collaborator.
+func (h *Handler) taskAccessCheck(w http.ResponseWriter, taskID, userID int64) (Task, bool) {
+	task, err := h.db.GetTaskByID(taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, "task not found", http.StatusNotFound)
+		return Task{}, false
+	}
+	if err != nil {
+		writeServerError(w, "failed to get task", err)
+		return Task{}, false
+	}
+	if task.UserID == userID {
+		return task, true
+	}
+	shared, err := h.db.IsSharedWith(taskID, userID)
+	if err != nil {
+		writeServerError(w, "failed to check access", err)
+		return Task{}, false
+	}
+	if !shared {
+		writeError(w, "task not found", http.StatusNotFound)
+		return Task{}, false
+	}
+	return task, true
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
@@ -271,10 +297,16 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID)
+	task, ok := h.taskAccessCheck(w, id, currentUser(r).UserID)
 	if !ok {
 		return
 	}
+	shares, err := h.db.GetSharesForTask(id)
+	if err != nil {
+		writeServerError(w, "failed to load shares", err)
+		return
+	}
+	task.SharedWith = shares
 	writeJSON(w, task)
 }
 
@@ -531,7 +563,7 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskOwnerCheck(w, req.TaskID, currentUser(r).UserID)
+	task, ok := h.taskAccessCheck(w, req.TaskID, currentUser(r).UserID)
 	if !ok {
 		return
 	}
@@ -542,7 +574,7 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := currentUser(r).UserID
+	actorID := currentUser(r).UserID
 
 	if found && !existing.Skipped {
 		// Was completed → uncomplete.
@@ -553,8 +585,8 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 		safeRemoveReceipt(h.receiptsDir, receiptFile)
 		writeJSON(w, map[string]bool{"completed": false})
-		go FireWebhooks(h.db, userID, "task.uncompleted", task.ID, task.Title, req.Month)
-		go h.db.InsertAuditLog(userID, "uncomplete", "completion", task.ID, task.Title)
+		go FireWebhooks(h.db, task.UserID, "task.uncompleted", task.ID, task.Title, req.Month)
+		go h.db.InsertAuditLog(actorID, "uncomplete", "completion", task.ID, task.Title)
 	} else if found && existing.Skipped {
 		// Was skipped → mark as completed.
 		if _, err := h.db.CompleteSkipped(req.TaskID, req.Month); err != nil {
@@ -562,8 +594,8 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
-		go FireWebhooks(h.db, userID, "task.completed", task.ID, task.Title, req.Month)
-		go h.db.InsertAuditLog(userID, "complete", "completion", task.ID, task.Title)
+		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month)
+		go h.db.InsertAuditLog(actorID, "complete", "completion", task.ID, task.Title)
 	} else {
 		// Pending → complete.
 		if _, err := h.db.AddCompletion(req.TaskID, req.Month); err != nil {
@@ -571,8 +603,8 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
-		go FireWebhooks(h.db, userID, "task.completed", task.ID, task.Title, req.Month)
-		go h.db.InsertAuditLog(userID, "complete", "completion", task.ID, task.Title)
+		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month)
+		go h.db.InsertAuditLog(actorID, "complete", "completion", task.ID, task.Title)
 	}
 }
 
@@ -587,7 +619,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskAccessCheck(w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
 
@@ -659,7 +691,7 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskAccessCheck(w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
 
@@ -752,7 +784,7 @@ func (h *Handler) DeleteCompletionReceipt(w http.ResponseWriter, r *http.Request
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskAccessCheck(w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
 
@@ -798,12 +830,12 @@ func (h *Handler) SkipCompletion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskOwnerCheck(w, req.TaskID, currentUser(r).UserID)
+	task, ok := h.taskAccessCheck(w, req.TaskID, currentUser(r).UserID)
 	if !ok {
 		return
 	}
 
-	userID := currentUser(r).UserID
+	actorID := currentUser(r).UserID
 	completion, nowSkipped, err := h.db.SkipCompletion(req.TaskID, req.Month)
 	if err != nil {
 		if err.Error() == "task is already completed" {
@@ -815,10 +847,10 @@ func (h *Handler) SkipCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 	if nowSkipped {
 		writeJSON(w, map[string]any{"skipped": true, "completion": completion})
-		go h.db.InsertAuditLog(userID, "skip", "completion", task.ID, task.Title)
+		go h.db.InsertAuditLog(actorID, "skip", "completion", task.ID, task.Title)
 	} else {
 		writeJSON(w, map[string]any{"skipped": false})
-		go h.db.InsertAuditLog(userID, "unskip", "completion", task.ID, task.Title)
+		go h.db.InsertAuditLog(actorID, "unskip", "completion", task.ID, task.Title)
 	}
 }
 
@@ -1018,4 +1050,104 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, result)
+}
+
+// ======== Task Shares ========
+
+func (h *Handler) GetTaskShares(w http.ResponseWriter, r *http.Request) {
+	taskID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+		return
+	}
+	shares, err := h.db.GetSharesForTask(taskID)
+	if err != nil {
+		writeServerError(w, "failed to load shares", err)
+		return
+	}
+	if shares == nil {
+		shares = []SharedUser{}
+	}
+	writeJSON(w, shares)
+}
+
+func (h *Handler) AddTaskShare(w http.ResponseWriter, r *http.Request) {
+	taskID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+		return
+	}
+	var req struct {
+		UserID int64 `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.UserID == 0 {
+		writeError(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.UserID == currentUser(r).UserID {
+		writeError(w, "cannot share task with yourself", http.StatusBadRequest)
+		return
+	}
+	if err := h.db.AddShare(taskID, req.UserID); err != nil {
+		writeServerError(w, "failed to add share", err)
+		return
+	}
+	shares, err := h.db.GetSharesForTask(taskID)
+	if err != nil {
+		writeServerError(w, "failed to load shares", err)
+		return
+	}
+	if shares == nil {
+		shares = []SharedUser{}
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, shares)
+}
+
+func (h *Handler) RemoveTaskShare(w http.ResponseWriter, r *http.Request) {
+	taskID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	sharedUserID, err := strconv.ParseInt(chi.URLParam(r, "user_id"), 10, 64)
+	if err != nil {
+		writeError(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+		return
+	}
+	if err := h.db.RemoveShare(taskID, sharedUserID); err != nil {
+		writeServerError(w, "failed to remove share", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) LookupUsers(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if len(q) < 1 {
+		writeJSON(w, []SharedUser{})
+		return
+	}
+	users, err := h.db.LookupUsers(q, currentUser(r).UserID)
+	if err != nil {
+		writeServerError(w, "failed to search users", err)
+		return
+	}
+	if users == nil {
+		users = []SharedUser{}
+	}
+	writeJSON(w, users)
 }

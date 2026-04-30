@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.15.0] — 2026-04-30
+
+### Added
+- **Shared task lists** — task owners can share individual tasks with other users. Shared users see the task in their monthly view (with a "shared by X" badge), can toggle, skip, patch, and upload receipts. Sharing is managed from the Manage view via an inline Share panel with live user search. Completions and receipts on shared tasks are shared state — one completion is visible to all collaborators.
+- `GET/POST/DELETE /api/tasks/{id}/shares` — manage per-task collaborators; only the task owner can add/remove; self-share returns 400.
+- `GET /api/users/lookup?q=` — user search endpoint for the share autocomplete (returns up to 20 matches, excludes the requesting user).
+
+### Fixed
+- **Webhook actor** — `task.completed` and `task.uncompleted` webhooks now fire against the task owner's webhook subscriptions, not the actor's (matters when a shared user toggles a task).
+
 ## [0.14.0] — 2026-04-30
 
 ### Fixed

@@ -158,6 +158,22 @@ export function exportCompletionsCSV(from, to) {
   return fetch(`${BASE}/export/completions.csv?${params}`)
 }
 
+export const fetchTaskShares = (taskId) =>
+  request(`/tasks/${taskId}/shares`)
+
+export const addTaskShare = (taskId, userId) =>
+  request(`/tasks/${taskId}/shares`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId }),
+  })
+
+export const removeTaskShare = (taskId, userId) =>
+  request(`/tasks/${taskId}/shares/${userId}`, { method: 'DELETE' })
+
+export const lookupUsers = (q) =>
+  request(`/users/lookup?q=${encodeURIComponent(q)}`)
+
 export async function importCompletionsCSV(file) {
   const form = new FormData()
   form.append('file', file)

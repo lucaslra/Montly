@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import TaskForm from './TaskForm.jsx'
 import { formatAmount } from '../utils.js'
-import { fetchArchivedTasks, deleteTask } from '../api.js'
+import { fetchArchivedTasks, deleteTask, fetchTaskShares, addTaskShare, removeTaskShare, lookupUsers } from '../api.js'
 
 const INTERVAL_LABELS = { 2: 'Bimestral', 3: 'Trimestral', 6: 'Semestral', 12: 'Annual' }
 function intervalLabel(n) { return INTERVAL_LABELS[n] ?? `Every ${n}m` }
@@ -26,6 +26,7 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
   const [archivedTasks, setArchivedTasks] = useState([])
   const [loadingArchived, setLoadingArchived] = useState(false)
   const [confirmPermDelete, setConfirmPermDelete] = useState(null)
+  const [sharingTask, setSharingTask] = useState(null)
 
   useEffect(() => {
     if (!showArchived) return
@@ -144,6 +145,13 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
                   <>
                     <button className="btn-icon" onClick={() => setEditing(task)}>Edit</button>
                     <button
+                      className="btn-icon"
+                      onClick={() => setSharingTask(sharingTask === task.id ? null : task.id)}
+                      aria-pressed={sharingTask === task.id}
+                    >
+                      Share
+                    </button>
+                    <button
                       className="btn-icon btn-warning"
                       onClick={() => setConfirmArchive(task.id)}
                     >
@@ -152,6 +160,9 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
                   </>
                 )}
               </div>
+              {sharingTask === task.id && (
+                <SharePanel taskId={task.id} onClose={() => setSharingTask(null)} />
+              )}
             </li>
           ))}
         </ul>
@@ -224,6 +235,107 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
           onClose={() => { setAdding(false); setEditing(null) }}
         />
       )}
+    </div>
+  )
+}
+
+function SharePanel({ taskId, onClose }) {
+  const [shares, setShares] = useState(null)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [error, setError] = useState('')
+  const searchRef = useRef(null)
+  const debounceRef = useRef(null)
+
+  useEffect(() => {
+    fetchTaskShares(taskId).then(setShares).catch(() => setShares([]))
+    searchRef.current?.focus()
+  }, [taskId])
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current)
+    if (query.trim().length < 1) { setResults([]); return }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const users = await lookupUsers(query.trim())
+        const sharedIds = new Set((shares ?? []).map(s => s.id))
+        setResults(users.filter(u => !sharedIds.has(u.id)))
+      } catch { setResults([]) }
+    }, 250)
+    return () => clearTimeout(debounceRef.current)
+  }, [query, shares])
+
+  async function handleAdd(user) {
+    setError('')
+    try {
+      const updated = await addTaskShare(taskId, user.id)
+      setShares(updated)
+      setQuery('')
+      setResults([])
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  async function handleRemove(userId) {
+    setError('')
+    try {
+      await removeTaskShare(taskId, userId)
+      setShares(prev => prev.filter(s => s.id !== userId))
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  return (
+    <div className="share-panel">
+      <div className="share-panel-header">
+        <span className="share-panel-title">Shared with</span>
+        <button className="btn-icon" onClick={onClose} aria-label="Close share panel">✕</button>
+      </div>
+      {shares === null ? (
+        <div className="share-panel-loading">Loading…</div>
+      ) : shares.length === 0 ? (
+        <div className="share-panel-empty">Not shared with anyone yet.</div>
+      ) : (
+        <ul className="share-list">
+          {shares.map(u => (
+            <li key={u.id} className="share-list-item">
+              <span className="share-username">{u.username}</span>
+              <button
+                className="btn-icon btn-danger"
+                onClick={() => handleRemove(u.id)}
+                aria-label={`Remove ${u.username}`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="share-search">
+        <input
+          ref={searchRef}
+          type="search"
+          className="share-search-input"
+          placeholder="Add user by name…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          aria-label="Search users to share with"
+        />
+        {results.length > 0 && (
+          <ul className="share-results">
+            {results.map(u => (
+              <li key={u.id}>
+                <button className="share-result-btn" onClick={() => handleAdd(u)}>
+                  {u.username}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
     </div>
   )
 }
