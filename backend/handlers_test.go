@@ -1865,3 +1865,410 @@ func TestFireWebhooks_EventFilter(t *testing.T) {
 		cap.expectNoHit(t)
 	})
 }
+
+// buildReceiptUpload creates a multipart/form-data request with a fake receipt file.
+func buildReceiptUpload(t *testing.T, method, path string, content []byte, filename string) *http.Request {
+	t.Helper()
+	boundary := "receiptboundary99"
+	var buf strings.Builder
+	buf.WriteString("--" + boundary + "\r\n")
+	buf.WriteString(`Content-Disposition: form-data; name="file"; filename="` + filename + `"` + "\r\n")
+	buf.WriteString("Content-Type: application/octet-stream\r\n\r\n")
+	req := httptest.NewRequest(method, path, io.MultiReader(strings.NewReader(buf.String()), strings.NewReader(string(content)), strings.NewReader("\r\n--"+boundary+"--\r\n")))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	return req
+}
+
+// ── ArchiveTask / UnarchiveTask / ListArchivedTasks ───────────────────────────
+
+func TestArchiveHandlers(t *testing.T) {
+	t.Run("archive removes task from active list", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Monthly bill", alice.ID)
+
+		w := ts.do(ts.authReq(t, http.MethodPatch, fmt.Sprintf("/api/tasks/%d/archive", task.ID), "", alice.ID, false))
+		assertStatus(t, w, http.StatusNoContent)
+
+		// Active list no longer contains the task.
+		w2 := ts.do(ts.authReq(t, http.MethodGet, "/api/tasks?month=2020-01", "", alice.ID, false))
+		assertStatus(t, w2, http.StatusOK)
+		var active []Task
+		decodeJSON(t, w2, &active)
+		for _, tsk := range active {
+			if tsk.ID == task.ID {
+				t.Fatal("archived task still appears in active list")
+			}
+		}
+	})
+
+	t.Run("archived task appears in archived list", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Monthly bill", alice.ID)
+
+		ts.do(ts.authReq(t, http.MethodPatch, fmt.Sprintf("/api/tasks/%d/archive", task.ID), "", alice.ID, false))
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/tasks/archived", "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var archived []Task
+		decodeJSON(t, w, &archived)
+		found := false
+		for _, tsk := range archived {
+			if tsk.ID == task.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("archived task not found in archived list")
+		}
+	})
+
+	t.Run("unarchive restores task to active list", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Monthly bill", alice.ID)
+
+		ts.do(ts.authReq(t, http.MethodPatch, fmt.Sprintf("/api/tasks/%d/archive", task.ID), "", alice.ID, false))
+		w := ts.do(ts.authReq(t, http.MethodPatch, fmt.Sprintf("/api/tasks/%d/unarchive", task.ID), "", alice.ID, false))
+		assertStatus(t, w, http.StatusNoContent)
+
+		w2 := ts.do(ts.authReq(t, http.MethodGet, "/api/tasks?month=2020-01", "", alice.ID, false))
+		var active []Task
+		decodeJSON(t, w2, &active)
+		found := false
+		for _, tsk := range active {
+			if tsk.ID == task.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("unarchived task not found in active list")
+		}
+	})
+
+	t.Run("other user cannot archive task", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Alice's task", alice.ID)
+
+		w := ts.do(ts.authReq(t, http.MethodPatch, fmt.Sprintf("/api/tasks/%d/archive", task.ID), "", bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
+// ── SkipCompletion ────────────────────────────────────────────────────────────
+
+func TestSkipCompletion(t *testing.T) {
+	t.Run("skip pending task marks it skipped", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", body, alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var c Completion
+		decodeJSON(t, w, &c)
+		if !c.Skipped {
+			t.Error("expected completion to be skipped")
+		}
+	})
+
+	t.Run("unskip removes skip (toggle behaviour)", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", body, alice.ID, false))
+		// Skip again → should un-skip.
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", body, alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var c map[string]interface{}
+		decodeJSON(t, w, &c)
+		// Result should be null completion or skipped=false.
+		if skipped, ok := c["skipped"]; ok && skipped == true {
+			t.Error("expected task to be un-skipped")
+		}
+	})
+
+	t.Run("skip already-completed task fails with 400", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		// Mark complete first.
+		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", toggleBody, alice.ID, false))
+
+		skipBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", skipBody, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+}
+
+// ── Receipt upload / download / delete ───────────────────────────────────────
+
+func TestReceiptHandlers(t *testing.T) {
+	// PNG magic bytes: first 8 bytes of a valid PNG.
+	pngBytes := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00}
+
+	t.Run("upload valid PNG receipt returns 201 with uuid filename", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		// Complete the task first.
+		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", toggleBody, alice.ID, false))
+
+		path := fmt.Sprintf("/api/completions/%d/2020-01/receipt", task.ID)
+		req := buildReceiptUpload(t, http.MethodPost, path, pngBytes, "receipt.png")
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: func() string {
+			tok, _ := newSession(sessionClaims{UserID: alice.ID, IsAdmin: false, Expires: time.Now().Add(time.Hour).Unix()}, ts.secret)
+			return tok
+		}()})
+		w := ts.do(req)
+		assertStatus(t, w, http.StatusOK)
+
+		var resp Completion
+		decodeJSON(t, w, &resp)
+		if resp.ReceiptFile == "" {
+			t.Error("expected receipt_file in response")
+		}
+	})
+
+	t.Run("upload rejected for invalid MIME type", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", toggleBody, alice.ID, false))
+
+		path := fmt.Sprintf("/api/completions/%d/2020-01/receipt", task.ID)
+		req := buildReceiptUpload(t, http.MethodPost, path, []byte("not a real image"), "receipt.exe")
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: func() string {
+			tok, _ := newSession(sessionClaims{UserID: alice.ID, IsAdmin: false, Expires: time.Now().Add(time.Hour).Unix()}, ts.secret)
+			return tok
+		}()})
+		w := ts.do(req)
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("delete receipt returns 204", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", toggleBody, alice.ID, false))
+
+		// Upload a receipt first.
+		path := fmt.Sprintf("/api/completions/%d/2020-01/receipt", task.ID)
+		req := buildReceiptUpload(t, http.MethodPost, path, pngBytes, "receipt.png")
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: func() string {
+			tok, _ := newSession(sessionClaims{UserID: alice.ID, IsAdmin: false, Expires: time.Now().Add(time.Hour).Unix()}, ts.secret)
+			return tok
+		}()})
+		ts.do(req)
+
+		// Delete it.
+		w := ts.do(ts.authReq(t, http.MethodDelete, path, "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("other user cannot delete receipt", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", toggleBody, alice.ID, false))
+
+		path := fmt.Sprintf("/api/completions/%d/2020-01/receipt", task.ID)
+		req := buildReceiptUpload(t, http.MethodPost, path, pngBytes, "receipt.png")
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: func() string {
+			tok, _ := newSession(sessionClaims{UserID: alice.ID, IsAdmin: false, Expires: time.Now().Add(time.Hour).Unix()}, ts.secret)
+			return tok
+		}()})
+		ts.do(req)
+
+		w := ts.do(ts.authReq(t, http.MethodDelete, path, "", bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
+// ── TaskShares (HTTP) ─────────────────────────────────────────────────────────
+
+func TestTaskShareHandlers(t *testing.T) {
+	t.Run("get shares returns empty list initially", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		w := ts.do(ts.authReq(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d/shares", task.ID), "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var shares []SharedUser
+		decodeJSON(t, w, &shares)
+		if len(shares) != 0 {
+			t.Errorf("expected 0 shares, got %d", len(shares))
+		}
+	})
+
+	t.Run("add share returns populated list", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		body := fmt.Sprintf(`{"user_id":%d}`, bob.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/tasks/%d/shares", task.ID), body, alice.ID, false))
+		assertStatus(t, w, http.StatusCreated)
+
+		var shares []SharedUser
+		decodeJSON(t, w, &shares)
+		if len(shares) != 1 || shares[0].ID != bob.ID {
+			t.Errorf("expected 1 share with bob, got %v", shares)
+		}
+	})
+
+	t.Run("self-share returns 400", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		body := fmt.Sprintf(`{"user_id":%d}`, alice.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/tasks/%d/shares", task.ID), body, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("non-owner cannot add share", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		body := fmt.Sprintf(`{"user_id":%d}`, alice.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/tasks/%d/shares", task.ID), body, bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+
+	t.Run("remove share returns 204", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+
+		ts.db.AddShare(task.ID, bob.ID)
+
+		w := ts.do(ts.authReq(t, http.MethodDelete,
+			fmt.Sprintf("/api/tasks/%d/shares/%d", task.ID, bob.ID), "", alice.ID, false))
+		assertStatus(t, w, http.StatusNoContent)
+
+		shared, _ := ts.db.IsSharedWith(task.ID, bob.ID)
+		if shared {
+			t.Error("share should have been removed")
+		}
+	})
+
+	t.Run("lookup users excludes self and returns matches", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		ts.mustUser(t, "bob", false)
+		ts.mustUser(t, "carol", false)
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/users/lookup?q=bo", "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var users []SharedUser
+		decodeJSON(t, w, &users)
+		if len(users) != 1 || users[0].Username != "bob" {
+			t.Errorf("expected [bob], got %v", users)
+		}
+	})
+}
+
+// ── Shared task access ────────────────────────────────────────────────────────
+
+func TestSharedTaskAccess(t *testing.T) {
+	t.Run("shared user can toggle completion", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+		ts.db.AddShare(task.ID, bob.ID)
+
+		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", body, bob.ID, false))
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("shared user can patch completion", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+		ts.db.AddShare(task.ID, bob.ID)
+
+		// Complete the task first (as alice, the owner).
+		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", toggleBody, alice.ID, false))
+
+		// Bob patches the amount.
+		patchBody := `{"amount":"99.99"}`
+		w := ts.do(ts.authReq(t, http.MethodPatch, fmt.Sprintf("/api/completions/%d/2020-01", task.ID), patchBody, bob.ID, false))
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("shared user can skip task", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+		ts.db.AddShare(task.ID, bob.ID)
+
+		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", body, bob.ID, false))
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("non-shared user gets 404 on completion", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+		// bob is NOT added as a share
+
+		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", body, bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+}
+
+// ── Webhook fires against task owner when a shared user acts ─────────────────
+
+func TestToggleCompletionWebhookActorVsOwner(t *testing.T) {
+	t.Run("webhook fires against task owner not the actor", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		task := ts.mustTask(t, "Bill", alice.ID)
+		ts.db.AddShare(task.ID, bob.ID)
+
+		// Alice has a webhook; bob does not.
+		cap := newWebhookCapture()
+		defer cap.close()
+		ts.db.CreateWebhook(alice.ID, cap.srv.URL, "task.completed", "")
+
+		// Bob toggles the shared task.
+		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", body, bob.ID, false))
+		assertStatus(t, w, http.StatusOK)
+
+		// Alice's webhook must fire (owner), not bob's (none).
+		cap.waitHit(t)
+	})
+}

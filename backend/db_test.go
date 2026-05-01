@@ -957,3 +957,263 @@ func TestImportCompletionsCSV(t *testing.T) {
 		}
 	})
 }
+
+// ── Archive ───────────────────────────────────────────────────────────────────
+
+func TestArchiveTaskDB(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+
+	active, _ := db.GetTasks("9999-12", user.ID)
+	if len(active) != 1 {
+		t.Errorf("before archive: want 1 task, got %d", len(active))
+	}
+
+	if err := db.ArchiveTask(task.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	active, _ = db.GetTasks("9999-12", user.ID)
+	if len(active) != 0 {
+		t.Errorf("after archive: want 0 active tasks, got %d", len(active))
+	}
+
+	archived, err := db.GetArchivedTasks(user.ID)
+	if err != nil {
+		t.Fatalf("get archived: %v", err)
+	}
+	if len(archived) != 1 {
+		t.Errorf("archived list: want 1, got %d", len(archived))
+	}
+	if archived[0].ArchivedAt == nil {
+		t.Error("archived_at should be non-nil")
+	}
+
+	if err := db.UnarchiveTask(task.ID); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+
+	active, _ = db.GetTasks("9999-12", user.ID)
+	if len(active) != 1 {
+		t.Errorf("after unarchive: want 1 active task, got %d", len(active))
+	}
+
+	archived, _ = db.GetArchivedTasks(user.ID)
+	if len(archived) != 0 {
+		t.Errorf("after unarchive: want 0 archived tasks, got %d", len(archived))
+	}
+}
+
+func TestGetArchivedTasks_UserScoped(t *testing.T) {
+	db := setupTestDB(t)
+	alice, _ := db.CreateUser("alice", testHash(t), false)
+	bob, _ := db.CreateUser("bob", testHash(t), false)
+
+	aliceTask, _ := db.CreateTask("Alice task", "", "", "2020-01", "", nil, alice.ID, 1)
+	db.ArchiveTask(aliceTask.ID)
+
+	bobArchived, _ := db.GetArchivedTasks(bob.ID)
+	if len(bobArchived) != 0 {
+		t.Errorf("bob should see 0 archived tasks, got %d", len(bobArchived))
+	}
+}
+
+// ── AuditLog ──────────────────────────────────────────────────────────────────
+
+func TestAuditLog(t *testing.T) {
+	db := setupTestDB(t)
+	user, _ := db.CreateUser("alice", testHash(t), false)
+
+	db.InsertAuditLog(user.ID, "complete", "completion", 1, "Pay rent")
+	db.InsertAuditLog(user.ID, "uncomplete", "completion", 1, "Pay rent")
+
+	logs, total, err := db.GetAuditLogs(10, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLogs: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total: got %d, want 2", total)
+	}
+	if len(logs) != 2 {
+		t.Errorf("len(logs): got %d, want 2", len(logs))
+	}
+	// All logs reference the right user.
+	for _, l := range logs {
+		if l.Username != "alice" {
+			t.Errorf("username: got %q, want alice", l.Username)
+		}
+		if l.EntityLabel != "Pay rent" {
+			t.Errorf("entity_label: got %q, want 'Pay rent'", l.EntityLabel)
+		}
+	}
+
+	// Pagination: limit 1
+	page, total2, err := db.GetAuditLogs(1, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLogs page: %v", err)
+	}
+	if total2 != 2 {
+		t.Errorf("total with limit: got %d, want 2", total2)
+	}
+	if len(page) != 1 {
+		t.Errorf("page len: got %d, want 1", len(page))
+	}
+
+	// Offset beyond total returns empty slice with correct total.
+	empty, total3, err := db.GetAuditLogs(10, 99)
+	if err != nil {
+		t.Fatalf("GetAuditLogs offset: %v", err)
+	}
+	if total3 != 2 {
+		t.Errorf("total with offset: got %d, want 2", total3)
+	}
+	if len(empty) != 0 {
+		t.Errorf("offset beyond total: want 0 results, got %d", len(empty))
+	}
+}
+
+// ── Task Shares ───────────────────────────────────────────────────────────────
+
+func TestTaskSharesDB(t *testing.T) {
+	db := setupTestDB(t)
+	alice, _ := db.CreateUser("alice", testHash(t), false)
+	bob, _ := db.CreateUser("bob", testHash(t), false)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, alice.ID, 1)
+
+	// Initially not shared.
+	shared, err := db.IsSharedWith(task.ID, bob.ID)
+	if err != nil {
+		t.Fatalf("IsSharedWith: %v", err)
+	}
+	if shared {
+		t.Error("task should not be shared initially")
+	}
+
+	shares, err := db.GetSharesForTask(task.ID)
+	if err != nil {
+		t.Fatalf("GetSharesForTask: %v", err)
+	}
+	if len(shares) != 0 {
+		t.Errorf("GetSharesForTask: want 0, got %d", len(shares))
+	}
+
+	// AddShare.
+	if err := db.AddShare(task.ID, bob.ID); err != nil {
+		t.Fatalf("AddShare: %v", err)
+	}
+
+	shared, err = db.IsSharedWith(task.ID, bob.ID)
+	if err != nil {
+		t.Fatalf("IsSharedWith after add: %v", err)
+	}
+	if !shared {
+		t.Error("task should be shared with bob after AddShare")
+	}
+
+	shares, err = db.GetSharesForTask(task.ID)
+	if err != nil {
+		t.Fatalf("GetSharesForTask after add: %v", err)
+	}
+	if len(shares) != 1 {
+		t.Fatalf("GetSharesForTask after add: want 1, got %d", len(shares))
+	}
+	if shares[0].Username != "bob" {
+		t.Errorf("share username: got %q, want bob", shares[0].Username)
+	}
+
+	// AddShare is idempotent.
+	if err := db.AddShare(task.ID, bob.ID); err != nil {
+		t.Fatalf("AddShare duplicate: %v", err)
+	}
+	shares, _ = db.GetSharesForTask(task.ID)
+	if len(shares) != 1 {
+		t.Errorf("after duplicate AddShare: want 1 share, got %d", len(shares))
+	}
+
+	// RemoveShare.
+	if err := db.RemoveShare(task.ID, bob.ID); err != nil {
+		t.Fatalf("RemoveShare: %v", err)
+	}
+
+	shared, _ = db.IsSharedWith(task.ID, bob.ID)
+	if shared {
+		t.Error("task should not be shared after RemoveShare")
+	}
+}
+
+func TestGetTasks_SharedTask(t *testing.T) {
+	db := setupTestDB(t)
+	alice, _ := db.CreateUser("alice", testHash(t), false)
+	bob, _ := db.CreateUser("bob", testHash(t), false)
+
+	task, _ := db.CreateTask("Shared task", "", "", "2020-01", "", nil, alice.ID, 1)
+
+	// Before sharing, bob sees 0 tasks.
+	bobTasks, _ := db.GetTasks("9999-12", bob.ID)
+	if len(bobTasks) != 0 {
+		t.Errorf("before share: bob wants 0 tasks, got %d", len(bobTasks))
+	}
+
+	db.AddShare(task.ID, bob.ID)
+
+	// After sharing, bob sees the task with is_shared=true and owner_name.
+	bobTasks, err := db.GetTasks("9999-12", bob.ID)
+	if err != nil {
+		t.Fatalf("GetTasks after share: %v", err)
+	}
+	if len(bobTasks) != 1 {
+		t.Fatalf("after share: bob wants 1 task, got %d", len(bobTasks))
+	}
+	if !bobTasks[0].IsShared {
+		t.Error("task should have is_shared=true for shared user")
+	}
+	if bobTasks[0].OwnerName != "alice" {
+		t.Errorf("owner_name: got %q, want alice", bobTasks[0].OwnerName)
+	}
+
+	// Alice still sees her own task with is_shared=false.
+	aliceTasks, _ := db.GetTasks("9999-12", alice.ID)
+	if len(aliceTasks) != 1 {
+		t.Errorf("alice task count: got %d, want 1", len(aliceTasks))
+	}
+	if aliceTasks[0].IsShared {
+		t.Error("alice's own task should have is_shared=false")
+	}
+}
+
+func TestLookupUsersDB(t *testing.T) {
+	db := setupTestDB(t)
+	alice, _ := db.CreateUser("alice", testHash(t), false)
+	db.CreateUser("bob", testHash(t), false)
+	db.CreateUser("alice2", testHash(t), false)
+
+	// Search for "ali" — should match alice and alice2 but not bob.
+	results, err := db.LookupUsers("ali", alice.ID)
+	if err != nil {
+		t.Fatalf("LookupUsers: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("LookupUsers('ali', alice): want 1 (alice excluded), got %d", len(results))
+	}
+	if results[0].Username != "alice2" {
+		t.Errorf("result: got %q, want alice2", results[0].Username)
+	}
+
+	// Empty query returns empty slice.
+	empty, err := db.LookupUsers("", alice.ID)
+	if err != nil {
+		t.Fatalf("LookupUsers empty: %v", err)
+	}
+	// Empty pattern matches all, but verifying it at least doesn't error.
+	_ = empty
+
+	// Case-insensitive match.
+	upper, err := db.LookupUsers("BOB", alice.ID)
+	if err != nil {
+		t.Fatalf("LookupUsers case: %v", err)
+	}
+	if len(upper) != 1 || upper[0].Username != "bob" {
+		t.Errorf("case-insensitive: got %v, want [{bob}]", upper)
+	}
+}

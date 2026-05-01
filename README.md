@@ -24,12 +24,15 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 - **Recurring tasks** — monthly, bi-monthly, quarterly, semi-annual, or annual intervals
 - **Task types** — payment, subscription, bill, reminder (or none)
 - **Completion tracking** — mark tasks done per month, attach receipt files (PDF, image)
-- **Amount logging** — record the actual amount paid per completion
+- **Skip-a-month state** — explicitly skip a task for a given month, keeping it distinct from pending
+- **Amount logging** — record the actual amount paid per completion; override the default per-month
+- **Task archiving** — archive tasks instead of deleting; archived tasks are hidden from active views but preserve all completion history
+- **Shared tasks** — share individual tasks with other users; shared users can toggle, skip, patch amounts, and upload receipts; sharing is managed per-task from the Manage view
 - **Reports** — monthly spending bar chart with 6-month history and 3-month forecast, category donut chart, and stat cards (YTD/fiscal-year-to-date, monthly average, peak month, next forecast)
 - **Webhooks** — outbound HTTP POST on task completion, uncompletion, skip, and monthly digest; testable directly from the Settings panel
 - **Audit log** — append-only record of all completions, edits, deletes, user management, and token actions (admin only)
 - **CSV import & export** — bulk-export all completions; import from the same format to migrate or load historical data
-- **Multi-user** — isolated data per user; admin can create/delete accounts
+- **Multi-user** — per-user tasks, completions, and settings; admin can create/delete accounts; tasks can be shared across users
 - **First-run setup** — create the admin account through the UI on first access; no env vars needed
 - **API tokens** — headless / mobile client access via `Bearer mt_…` tokens
 - **Settings** — per-user currency symbol, date format, color mode (light/dark/system), task sort order, completed-task position, fiscal year start month, number format (1,234.56 or 1.234,56)
@@ -101,9 +104,16 @@ POST   /api/tasks
 GET    /api/tasks/:id
 PUT    /api/tasks/:id
 DELETE /api/tasks/:id
+PATCH  /api/tasks/:id/archive
+PATCH  /api/tasks/:id/unarchive
+GET    /api/tasks/archived
+GET    /api/tasks/:id/shares
+POST   /api/tasks/:id/shares
+DELETE /api/tasks/:id/shares/:user_id
 
 GET    /api/completions?month=YYYY-MM
 POST   /api/completions/toggle
+POST   /api/completions/skip
 PATCH  /api/completions/:task_id/:month
 POST   /api/completions/:task_id/:month/receipt
 DELETE /api/completions/:task_id/:month/receipt
@@ -120,11 +130,12 @@ POST   /api/webhooks
 DELETE /api/webhooks/:id
 POST   /api/webhooks/:id/test
 
-GET    /api/report?anchor=YYYY-MM
+GET    /api/report?anchor=YYYY-MM               — 6-month history + 3-month forecast in one request
 
 GET    /api/export/completions.csv
 POST   /api/import/completions.csv
 
+GET    /api/users/lookup?q=                     — user search for share autocomplete
 GET    /api/audit-logs                           — admin only
 GET    /api/users                                — admin only
 POST   /api/users                                — admin only

@@ -177,3 +177,26 @@ describe('TaskList', () => {
     })
   })
 })
+
+describe('shared-by badge', () => {
+  function makeSharedTask(ownerName) {
+    return { id: 99, title: 'Shared Task', type: 'reminder', is_shared: true, owner_name: ownerName }
+  }
+
+  it('renders shared-by badge when task.is_shared is true', () => {
+    renderList([makeSharedTask('alice')], new Map())
+    expect(screen.getByText('shared by alice')).toBeInTheDocument()
+  })
+
+  it('does not render badge when task.is_shared is false', () => {
+    const task = { id: 99, title: 'Own Task', type: 'reminder', is_shared: false, owner_name: 'alice' }
+    renderList([task], new Map())
+    expect(screen.queryByText(/shared by/i)).not.toBeInTheDocument()
+  })
+
+  it('does not render badge when owner_name is absent', () => {
+    const task = { id: 99, title: 'Own Task', type: 'reminder', is_shared: true }
+    renderList([task], new Map())
+    expect(screen.queryByText(/shared by/i)).not.toBeInTheDocument()
+  })
+})

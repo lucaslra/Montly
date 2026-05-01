@@ -10,6 +10,9 @@ import {
   fetchTokens, createToken, revokeToken,
   fetchUsers, createUser, deleteUser,
   fetchWebhooks, createWebhook, deleteWebhook,
+  archiveTask, unarchiveTask, fetchArchivedTasks,
+  fetchTaskShares, addTaskShare, removeTaskShare, lookupUsers,
+  importCompletionsCSV,
 } from '../api.js'
 
 function mockFetch(status, body) {
@@ -426,5 +429,86 @@ describe('deleteWebhook', () => {
     const [url, opts] = global.fetch.mock.calls[0]
     expect(url).toBe('/api/webhooks/5')
     expect(opts.method).toBe('DELETE')
+  })
+})
+
+describe('archiveTask', () => {
+  it('sends PATCH to /tasks/:id/archive', async () => {
+    mockFetch(204, null)
+    await archiveTask(3)
+    const [url, opts] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/tasks/3/archive')
+    expect(opts.method).toBe('PATCH')
+  })
+})
+
+describe('unarchiveTask', () => {
+  it('sends PATCH to /tasks/:id/unarchive', async () => {
+    mockFetch(204, null)
+    await unarchiveTask(3)
+    const [url, opts] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/tasks/3/unarchive')
+    expect(opts.method).toBe('PATCH')
+  })
+})
+
+describe('fetchArchivedTasks', () => {
+  it('sends GET to /tasks/archived', async () => {
+    mockFetch(200, [])
+    await fetchArchivedTasks()
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/tasks/archived')
+  })
+})
+
+describe('fetchTaskShares', () => {
+  it('sends GET to /tasks/:id/shares', async () => {
+    mockFetch(200, [])
+    await fetchTaskShares(7)
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/tasks/7/shares')
+  })
+})
+
+describe('addTaskShare', () => {
+  it('sends POST to /tasks/:id/shares with user_id', async () => {
+    mockFetch(201, [{ id: 2, username: 'bob' }])
+    await addTaskShare(7, 2)
+    const [url, opts] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/tasks/7/shares')
+    expect(opts.method).toBe('POST')
+    expect(JSON.parse(opts.body)).toEqual({ user_id: 2 })
+  })
+})
+
+describe('removeTaskShare', () => {
+  it('sends DELETE to /tasks/:id/shares/:user_id', async () => {
+    mockFetch(204, null)
+    await removeTaskShare(7, 2)
+    const [url, opts] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/tasks/7/shares/2')
+    expect(opts.method).toBe('DELETE')
+  })
+})
+
+describe('lookupUsers', () => {
+  it('sends GET to /users/lookup with encoded query', async () => {
+    mockFetch(200, [])
+    await lookupUsers('al ice')
+    const [url] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/users/lookup?q=al%20ice')
+  })
+})
+
+describe('importCompletionsCSV', () => {
+  it('sends POST to /import/completions.csv as form-data', async () => {
+    mockFetch(200, { tasks_created: 1, completions_created: 2, completions_updated: 0 })
+    const file = new File(['Title,Type\n'], 'import.csv', { type: 'text/csv' })
+    const result = await importCompletionsCSV(file)
+    const [url, opts] = global.fetch.mock.calls[0]
+    expect(url).toBe('/api/import/completions.csv')
+    expect(opts.method).toBe('POST')
+    expect(opts.body).toBeInstanceOf(FormData)
+    expect(result.tasks_created).toBe(1)
   })
 })

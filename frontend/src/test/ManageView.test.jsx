@@ -282,3 +282,99 @@ describe('ManageView', () => {
     expect(within(secondItem).getByRole('button', { name: 'Archive' })).toBeInTheDocument()
   })
 })
+
+// ── SharePanel ─────────────────────────────────────────────────────────────
+// SharePanel calls api.js directly, so we mock the module here.
+
+vi.mock('../api.js', () => ({
+  fetchArchivedTasks: vi.fn().mockResolvedValue([]),
+  fetchTaskShares: vi.fn(),
+  addTaskShare: vi.fn(),
+  removeTaskShare: vi.fn(),
+  lookupUsers: vi.fn(),
+}))
+
+import { fetchTaskShares, addTaskShare, removeTaskShare, lookupUsers } from '../api.js'
+
+describe('SharePanel', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('shows loading state while fetching shares', async () => {
+    fetchTaskShares.mockReturnValue(new Promise(() => {})) // never resolves
+    renderManage([makeTask({ id: 1, title: 'Bill' })])
+    await userEvent.click(screen.getByRole('button', { name: 'Share' }))
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
+  })
+
+  it('shows empty state when task is not shared with anyone', async () => {
+    fetchTaskShares.mockResolvedValue([])
+    renderManage([makeTask({ id: 1, title: 'Bill' })])
+    await userEvent.click(screen.getByRole('button', { name: 'Share' }))
+    await screen.findByText('Not shared with anyone yet.')
+  })
+
+  it('renders existing shares with remove buttons', async () => {
+    fetchTaskShares.mockResolvedValue([{ id: 42, username: 'bob' }])
+    renderManage([makeTask({ id: 1, title: 'Bill' })])
+    await userEvent.click(screen.getByRole('button', { name: 'Share' }))
+    await screen.findByText('bob')
+    expect(screen.getByRole('button', { name: 'Remove bob' })).toBeInTheDocument()
+  })
+
+  it('searches for users and adds a share', async () => {
+    fetchTaskShares.mockResolvedValue([])
+    lookupUsers.mockResolvedValue([{ id: 7, username: 'carol' }])
+    addTaskShare.mockResolvedValue([{ id: 7, username: 'carol' }])
+
+    renderManage([makeTask({ id: 1, title: 'Bill' })])
+    await userEvent.click(screen.getByRole('button', { name: 'Share' }))
+    await screen.findByText('Not shared with anyone yet.')
+
+    const input = screen.getByPlaceholderText('Add user by name…')
+    await userEvent.type(input, 'car')
+
+    await screen.findByRole('button', { name: 'carol' })
+    await userEvent.click(screen.getByRole('button', { name: 'carol' }))
+
+    expect(addTaskShare).toHaveBeenCalledWith(1, 7)
+    await screen.findByText('carol')
+  })
+
+  it('removes an existing share', async () => {
+    fetchTaskShares.mockResolvedValue([{ id: 42, username: 'bob' }])
+    removeTaskShare.mockResolvedValue(null)
+
+    renderManage([makeTask({ id: 1, title: 'Bill' })])
+    await userEvent.click(screen.getByRole('button', { name: 'Share' }))
+    await screen.findByText('bob')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove bob' }))
+    expect(removeTaskShare).toHaveBeenCalledWith(1, 42)
+    await waitFor(() => expect(screen.queryByText('bob')).not.toBeInTheDocument())
+  })
+
+  it('shows error message when add share fails', async () => {
+    fetchTaskShares.mockResolvedValue([])
+    lookupUsers.mockResolvedValue([{ id: 7, username: 'carol' }])
+    addTaskShare.mockRejectedValue(new Error('User not found'))
+
+    renderManage([makeTask({ id: 1, title: 'Bill' })])
+    await userEvent.click(screen.getByRole('button', { name: 'Share' }))
+    const input = screen.getByPlaceholderText('Add user by name…')
+    await userEvent.type(input, 'car')
+    await screen.findByRole('button', { name: 'carol' })
+    await userEvent.click(screen.getByRole('button', { name: 'carol' }))
+
+    await screen.findByText('User not found')
+  })
+
+  it('closes the share panel when X is clicked', async () => {
+    fetchTaskShares.mockResolvedValue([])
+    renderManage([makeTask({ id: 1, title: 'Bill' })])
+    await userEvent.click(screen.getByRole('button', { name: 'Share' }))
+    await screen.findByText('Not shared with anyone yet.')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close share panel' }))
+    expect(screen.queryByText('Not shared with anyone yet.')).not.toBeInTheDocument()
+  })
+})
