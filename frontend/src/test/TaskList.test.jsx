@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TaskList from '../components/TaskList.jsx'
 
-const TASK = { id: 1, title: 'Rent', description: '', type: 'payment', metadata: { amount: '500' }, interval: 1 }
+const TASK = { id: 1, title: 'Rent', description: '', type: 'payment', amount: '500', interval: 1 }
 const TASK_NO_TYPE = { id: 2, title: 'Check email', description: '', type: '', metadata: {}, interval: 1 }
 
 function renderList(tasks, completionMap = new Map(), overrides = {}) {

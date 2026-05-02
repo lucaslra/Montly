@@ -23,7 +23,7 @@ describe('TaskForm', () => {
     })
 
     it('pre-fills fields from task prop', () => {
-      renderForm({ task: { title: 'Rent', description: 'Monthly', type: 'payment', interval: 1, metadata: { amount: '500' }, start_date: '', end_date: '' } })
+      renderForm({ task: { title: 'Rent', description: 'Monthly', type: 'payment', interval: 1, amount: '500', start_date: '', end_date: '' } })
       expect(screen.getByLabelText('Title')).toHaveValue('Rent')
       expect(screen.getByLabelText(/Description/)).toHaveValue('Monthly')
     })
@@ -117,13 +117,13 @@ describe('TaskForm', () => {
       await userEvent.type(screen.getByLabelText(/Amount/), '1234,56')
       await userEvent.click(screen.getByRole('button', { name: 'Save' }))
       await waitFor(() => expect(onSave).toHaveBeenCalled())
-      expect(onSave.mock.calls[0][3]).toEqual({ amount: '1234.56' })
+      expect(onSave.mock.calls[0][3]).toBe('1234.56')
     })
 
     it('initializes amount with comma when editing existing task', () => {
       renderForm({
         numberFormat: 'eu',
-        task: { title: 'Rent', description: '', type: 'payment', interval: 1, metadata: { amount: '500.50' }, start_date: '', end_date: '' },
+        task: { title: 'Rent', description: '', type: 'payment', interval: 1, amount: '500.50', start_date: '', end_date: '' },
       })
       expect(screen.getByLabelText(/Amount/)).toHaveValue('500,50')
     })
@@ -150,7 +150,7 @@ describe('TaskForm', () => {
       await userEvent.selectOptions(screen.getByLabelText('Recurrence'), '3')
       await userEvent.click(screen.getByRole('button', { name: 'Save' }))
       await waitFor(() => expect(onSave).toHaveBeenCalled())
-      expect(onSave.mock.calls[0][6]).toBe(3)
+      expect(onSave.mock.calls[0][7]).toBe(3)
     })
 
     it('disables Save button while saving', async () => {

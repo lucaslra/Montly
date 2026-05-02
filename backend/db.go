@@ -56,6 +56,7 @@ type Task struct {
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
 	Type        string          `json:"type"`
+	Amount      string          `json:"amount"`
 	Metadata    json.RawMessage `json:"metadata"`
 	CreatedAt   string          `json:"created_at"`
 	StartDate   string          `json:"start_date"`
@@ -229,6 +230,8 @@ func migratePostgres(db *sql.DB) error {
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_id     BIGINT   REFERENCES users(id)`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS interval    INTEGER  NOT NULL DEFAULT 1`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS archived_at TEXT`,
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS amount      TEXT     NOT NULL DEFAULT ''`,
+		`UPDATE tasks SET amount = COALESCE(metadata::json->>'amount', '') WHERE amount = ''`,
 		`CREATE INDEX IF NOT EXISTS idx_completions_task_month ON completions(task_id, month)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`,
@@ -263,6 +266,7 @@ func migrate(db *sql.DB) error {
 			description TEXT    NOT NULL DEFAULT '',
 			type        TEXT    NOT NULL DEFAULT '',
 			metadata    TEXT    NOT NULL DEFAULT '{}',
+			amount      TEXT    NOT NULL DEFAULT '',
 			created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 		);
 		CREATE TABLE IF NOT EXISTS completions (
@@ -310,6 +314,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE tasks ADD COLUMN user_id     INTEGER REFERENCES users(id)`,
 		`ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE tasks ADD COLUMN archived_at TEXT`,
+		`ALTER TABLE tasks ADD COLUMN amount      TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE completions ADD COLUMN receipt_file TEXT    NOT NULL DEFAULT ''`,
 		`ALTER TABLE completions ADD COLUMN amount       TEXT    NOT NULL DEFAULT ''`,
 		`ALTER TABLE completions ADD COLUMN note         TEXT    NOT NULL DEFAULT ''`,
@@ -345,6 +350,7 @@ func migrate(db *sql.DB) error {
 			description TEXT    NOT NULL DEFAULT '',
 			type        TEXT    NOT NULL DEFAULT '',
 			metadata    TEXT    NOT NULL DEFAULT '{}',
+			amount      TEXT    NOT NULL DEFAULT '',
 			created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 			start_date  TEXT,
 			end_date    TEXT,
@@ -354,7 +360,7 @@ func migrate(db *sql.DB) error {
 		)`); err != nil {
 			return fmt.Errorf("create tasks: %w", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO tasks SELECT id,title,description,type,metadata,created_at,NULLIF(start_date,''),NULLIF(end_date,''),user_id,COALESCE(interval,1),NULL FROM tasks_old`); err != nil {
+		if _, err := tx.Exec(`INSERT INTO tasks SELECT id,title,description,type,metadata,COALESCE(json_extract(metadata,'$.amount'),''),created_at,NULLIF(start_date,''),NULLIF(end_date,''),user_id,COALESCE(interval,1),NULL FROM tasks_old`); err != nil {
 			return fmt.Errorf("migrate tasks data: %w", err)
 		}
 		if _, err := tx.Exec(`DROP TABLE tasks_old`); err != nil {
@@ -408,6 +414,8 @@ func migrate(db *sql.DB) error {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`)
+	// Backfill amount from metadata JSON for existing rows.
+	db.Exec(`UPDATE tasks SET amount = COALESCE(json_extract(metadata, '$.amount'), '') WHERE amount = ''`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS task_shares (
 		task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -564,14 +572,14 @@ func (db *DB) SaveSettings(userID int64, settings map[string]string) error {
 
 // ======== Tasks ========
 
-const taskColumns = `id, title, description, type, metadata, created_at, start_date, end_date, user_id, interval, archived_at`
+const taskColumns = `id, title, description, type, metadata, created_at, start_date, end_date, user_id, interval, archived_at, amount`
 
 func scanTask(row *sql.Row) (Task, error) {
 	var t Task
 	var meta string
 	var startDate, endDate *string
 	var userID *int64
-	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &userID, &t.Interval, &t.ArchivedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &userID, &t.Interval, &t.ArchivedAt, &t.Amount); err != nil {
 		return Task{}, err
 	}
 	if meta == "" {
@@ -643,7 +651,7 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 	mi := monthIndex(month)
 	es := "COALESCE(NULLIF(start_date,''), " + db.ymExpr("created_at") + ")"
 	esT := "COALESCE(NULLIF(t.start_date,''), " + db.ymExpr("t.created_at") + ")"
-	query := `SELECT id, title, description, type, metadata, created_at, start_date, end_date, user_id, interval, archived_at, 0 AS is_shared, '' AS owner_name
+	query := `SELECT id, title, description, type, metadata, created_at, start_date, end_date, user_id, interval, archived_at, amount, 0 AS is_shared, '' AS owner_name
 		FROM tasks
 		WHERE ` + es + ` <= ?
 		  AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
@@ -651,7 +659,7 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 		  AND archived_at IS NULL
 		  AND ` + db.intervalCheckExpr() + `
 		UNION
-		SELECT t.id, t.title, t.description, t.type, t.metadata, t.created_at, t.start_date, t.end_date, t.user_id, t.interval, t.archived_at, 1 AS is_shared, u.username AS owner_name
+		SELECT t.id, t.title, t.description, t.type, t.metadata, t.created_at, t.start_date, t.end_date, t.user_id, t.interval, t.archived_at, t.amount, 1 AS is_shared, u.username AS owner_name
 		FROM tasks t
 		JOIN task_shares ts ON ts.task_id = t.id
 		JOIN users u ON u.id = t.user_id
@@ -674,7 +682,7 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 		var uid *int64
 		var isSharedInt int
 		var ownerName string
-		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt, &isSharedInt, &ownerName); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt, &t.Amount, &isSharedInt, &ownerName); err != nil {
 			return nil, err
 		}
 		if meta == "" {
@@ -736,7 +744,7 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 		var meta string
 		var startDate, endDate *string
 		var uid *int64
-		if err := taskRows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt); err != nil {
+		if err := taskRows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt, &t.Amount); err != nil {
 			taskRows.Close()
 			return nil, fmt.Errorf("report task scan: %w", err)
 		}
@@ -844,7 +852,7 @@ func (db *DB) GetReceiptsForTask(taskID int64) ([]string, error) {
 	return files, rows.Err()
 }
 
-func (db *DB) CreateTask(title, description, taskType, startDate, endDate string, metadata json.RawMessage, userID int64, interval int) (Task, error) {
+func (db *DB) CreateTask(title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, userID int64, interval int) (Task, error) {
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
 	}
@@ -862,16 +870,16 @@ func (db *DB) CreateTask(title, description, taskType, startDate, endDate string
 	var id int64
 	if db.driver == "postgres" {
 		err := db.QueryRow(
-			db.q(`INSERT INTO tasks (title, description, type, metadata, start_date, end_date, user_id, interval) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`),
-			title, description, taskType, string(metadata), sd, ed, userID, interval,
+			db.q(`INSERT INTO tasks (title, description, type, metadata, start_date, end_date, user_id, interval, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`),
+			title, description, taskType, string(metadata), sd, ed, userID, interval, amount,
 		).Scan(&id)
 		if err != nil {
 			return Task{}, err
 		}
 	} else {
 		res, err := db.Exec(
-			db.q(`INSERT INTO tasks (title, description, type, metadata, start_date, end_date, user_id, interval) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-			title, description, taskType, string(metadata), sd, ed, userID, interval,
+			db.q(`INSERT INTO tasks (title, description, type, metadata, start_date, end_date, user_id, interval, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			title, description, taskType, string(metadata), sd, ed, userID, interval, amount,
 		)
 		if err != nil {
 			return Task{}, err
@@ -884,7 +892,7 @@ func (db *DB) CreateTask(title, description, taskType, startDate, endDate string
 	return db.GetTaskByID(id)
 }
 
-func (db *DB) UpdateTask(id int64, title, description, taskType, startDate, endDate string, metadata json.RawMessage, interval int) (Task, error) {
+func (db *DB) UpdateTask(id int64, title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, interval int) (Task, error) {
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
 	}
@@ -899,8 +907,8 @@ func (db *DB) UpdateTask(id int64, title, description, taskType, startDate, endD
 		ed = &endDate
 	}
 	_, err := db.Exec(
-		db.q(`UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?, start_date = ?, end_date = ?, interval = ? WHERE id = ?`),
-		title, description, taskType, string(metadata), sd, ed, interval, id,
+		db.q(`UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?, start_date = ?, end_date = ?, interval = ?, amount = ? WHERE id = ?`),
+		title, description, taskType, string(metadata), sd, ed, interval, amount, id,
 	)
 	if err != nil {
 		return Task{}, err
@@ -908,21 +916,10 @@ func (db *DB) UpdateTask(id int64, title, description, taskType, startDate, endD
 	return db.GetTaskByID(id)
 }
 
-// extractAmount pulls the "amount" string from a JSON metadata blob.
-// Returns "" on any parse failure or if the key is absent.
-func extractAmount(rawMeta string) string {
-	var m map[string]any
-	if err := json.Unmarshal([]byte(rawMeta), &m); err != nil {
-		return ""
-	}
-	a, _ := m["amount"].(string)
-	return a
-}
-
-// UpdateTaskWithAmountBackfill updates a task and, when the metadata amount changes,
+// UpdateTaskWithAmountBackfill updates a task and, when the amount changes,
 // stamps the previous amount onto past completions that held no per-completion override
-// (amount = ''). This preserves historical accuracy without any schema changes.
-func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskType, startDate, endDate string, metadata json.RawMessage, interval int) (Task, error) {
+// (amount = ''). This preserves historical accuracy.
+func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, interval int) (Task, error) {
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
 	}
@@ -943,22 +940,19 @@ func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskTyp
 	}
 	defer tx.Rollback()
 
-	var rawOld string
-	if err := tx.QueryRow(db.q(`SELECT metadata FROM tasks WHERE id = ?`), id).Scan(&rawOld); err != nil {
+	var oldAmount string
+	if err := tx.QueryRow(db.q(`SELECT amount FROM tasks WHERE id = ?`), id).Scan(&oldAmount); err != nil {
 		return Task{}, err
 	}
 
-	oldAmount := extractAmount(rawOld)
-	newAmount := extractAmount(string(metadata))
-
 	if _, err := tx.Exec(
-		db.q(`UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?, start_date = ?, end_date = ?, interval = ? WHERE id = ?`),
-		title, description, taskType, string(metadata), sd, ed, interval, id,
+		db.q(`UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?, start_date = ?, end_date = ?, interval = ?, amount = ? WHERE id = ?`),
+		title, description, taskType, string(metadata), sd, ed, interval, amount, id,
 	); err != nil {
 		return Task{}, err
 	}
 
-	if oldAmount != "" && newAmount != oldAmount {
+	if oldAmount != "" && amount != oldAmount {
 		if _, err := tx.Exec(
 			db.q(`UPDATE completions SET amount = ? WHERE task_id = ? AND (amount = '' OR amount IS NULL)`),
 			oldAmount, id,
@@ -1004,7 +998,7 @@ func (db *DB) GetArchivedTasks(userID int64) ([]Task, error) {
 		var meta string
 		var startDate, endDate *string
 		var uid *int64
-		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Type, &meta, &t.CreatedAt, &startDate, &endDate, &uid, &t.Interval, &t.ArchivedAt, &t.Amount); err != nil {
 			return nil, err
 		}
 		if meta == "" {

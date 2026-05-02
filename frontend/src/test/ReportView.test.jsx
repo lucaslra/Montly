@@ -39,7 +39,7 @@ function renderReport(overrides = {}) {
 }
 
 function makeMoneyTask(id, amount) {
-  return { id, title: `Task ${id}`, type: 'bill', metadata: { amount: String(amount) }, start_date: '', end_date: '', interval: 1 }
+  return { id, title: `Task ${id}`, type: 'bill', amount: String(amount), start_date: '', end_date: '', interval: 1 }
 }
 
 // ── Loading & error states ────────────────────────────────────────────────────

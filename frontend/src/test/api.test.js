@@ -172,7 +172,7 @@ describe('fetchTasks', () => {
 describe('createTask', () => {
   it('sends POST to /tasks with all fields', async () => {
     mockFetch(201, { id: 10 })
-    await createTask('Buy coffee', 'desc', 'expense', null, '2026-01', '2026-12', 2)
+    await createTask('Buy coffee', 'desc', 'expense', '9.99', null, '2026-01', '2026-12', 2)
     const [url, opts] = global.fetch.mock.calls[0]
     expect(url).toBe('/api/tasks')
     expect(opts.method).toBe('POST')
@@ -180,6 +180,7 @@ describe('createTask', () => {
       title: 'Buy coffee',
       description: 'desc',
       type: 'expense',
+      amount: '9.99',
       metadata: null,
       start_date: '2026-01',
       end_date: '2026-12',
@@ -189,7 +190,7 @@ describe('createTask', () => {
 
   it('defaults start_date and end_date to empty string when null', async () => {
     mockFetch(201, { id: 11 })
-    await createTask('Task', '', 'reminder', null, null, null)
+    await createTask('Task', '', 'reminder', '', null, null, null)
     const body = JSON.parse(global.fetch.mock.calls[0][1].body)
     expect(body.start_date).toBe('')
     expect(body.end_date).toBe('')
@@ -197,7 +198,7 @@ describe('createTask', () => {
 
   it('defaults interval to 1 when not provided', async () => {
     mockFetch(201, { id: 12 })
-    await createTask('Task', '', 'reminder', null, null, null)
+    await createTask('Task', '', 'reminder', '', null, null, null)
     const body = JSON.parse(global.fetch.mock.calls[0][1].body)
     expect(body.interval).toBe(1)
   })
@@ -206,7 +207,7 @@ describe('createTask', () => {
 describe('updateTask', () => {
   it('sends PUT to /tasks/:id with all fields', async () => {
     mockFetch(200, { id: 5 })
-    await updateTask(5, 'Updated', 'new desc', 'bill', '{}', '2026-03', '2026-09', 3)
+    await updateTask(5, 'Updated', 'new desc', 'bill', '14.99', '{}', '2026-03', '2026-09', 3)
     const [url, opts] = global.fetch.mock.calls[0]
     expect(url).toBe('/api/tasks/5')
     expect(opts.method).toBe('PUT')
@@ -214,6 +215,7 @@ describe('updateTask', () => {
       title: 'Updated',
       description: 'new desc',
       type: 'bill',
+      amount: '14.99',
       metadata: '{}',
       start_date: '2026-03',
       end_date: '2026-09',

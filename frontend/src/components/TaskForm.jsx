@@ -139,7 +139,7 @@ export default function TaskForm({ task, currency = '$', numberFormat = 'en', on
   const [title, setTitle] = useState(task?.title ?? '')
   const [description, setDescription] = useState(task?.description ?? '')
   const [type, setType] = useState(task?.type ?? '')
-  const [amount, setAmount] = useState(toLocalAmount(task?.metadata?.amount, numberFormat))
+  const [amount, setAmount] = useState(toLocalAmount(task?.amount, numberFormat))
   const [startDate, setStartDate] = useState(task?.start_date ?? '')
   const [endDate, setEndDate] = useState(task?.end_date ?? '')
   const [interval, setInterval] = useState(task?.interval ?? 1)
@@ -190,11 +190,6 @@ export default function TaskForm({ task, currency = '$', numberFormat = 'en', on
     }
   }
 
-  function buildMetadata() {
-    if (['payment', 'subscription', 'bill'].includes(type)) return { amount: fromLocalAmount(amount.trim(), numberFormat) }
-    return {}
-  }
-
   async function handleSubmit(e) {
     e.preventDefault()
     if (!title.trim()) return
@@ -209,8 +204,11 @@ export default function TaskForm({ task, currency = '$', numberFormat = 'en', on
     setAmountError('')
     setDateError('')
     setSaving(true)
+    const amountVal = ['payment', 'subscription', 'bill'].includes(type)
+      ? fromLocalAmount(amount.trim(), numberFormat)
+      : ''
     try {
-      await onSave(title.trim(), description.trim(), type, buildMetadata(), startDate, endDate, interval)
+      await onSave(title.trim(), description.trim(), type, amountVal, {}, startDate, endDate, interval)
     } finally {
       setSaving(false)
     }
