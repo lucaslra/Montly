@@ -601,6 +601,59 @@ func TestCompletionCRUD(t *testing.T) {
 	}
 }
 
+// ── CompleteSkipped ───────────────────────────────────────────────────────────
+
+func TestCompleteSkipped(t *testing.T) {
+	t.Run("skip then CompleteSkipped marks as done", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Gym", "", "reminder", "2026-01", "", nil, user.ID, 1)
+
+		_, _, err := db.SkipCompletion(task.ID, "2026-03")
+		if err != nil {
+			t.Fatalf("SkipCompletion: %v", err)
+		}
+
+		_, err = db.CompleteSkipped(task.ID, "2026-03")
+		if err != nil {
+			t.Fatalf("CompleteSkipped: %v", err)
+		}
+
+		c, found, err := db.GetCompletion(task.ID, "2026-03")
+		if err != nil {
+			t.Fatalf("GetCompletion: %v", err)
+		}
+		if !found {
+			t.Fatal("completion not found after CompleteSkipped")
+		}
+		if c.Skipped {
+			t.Error("expected skipped=false after CompleteSkipped")
+		}
+		if c.CompletedAt == "" {
+			t.Error("expected completed_at to be set after CompleteSkipped")
+		}
+	})
+
+	t.Run("CompleteSkipped on nonexistent row is a no-op", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Gym", "", "reminder", "2026-01", "", nil, user.ID, 1)
+
+		_, err := db.CompleteSkipped(task.ID, "2026-05")
+		if err != nil {
+			t.Fatalf("CompleteSkipped on nonexistent row: %v", err)
+		}
+
+		_, found, err := db.GetCompletion(task.ID, "2026-05")
+		if err != nil {
+			t.Fatalf("GetCompletion: %v", err)
+		}
+		if found {
+			t.Error("expected found=false: no row should have been created")
+		}
+	})
+}
+
 func TestGetCompletion_NotFound(t *testing.T) {
 	db := setupTestDB(t)
 	user, _ := db.CreateUser("alice", testHash(t), false)
