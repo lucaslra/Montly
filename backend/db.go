@@ -892,30 +892,6 @@ func (db *DB) CreateTask(title, description, taskType, startDate, endDate, amoun
 	return db.GetTaskByID(id)
 }
 
-func (db *DB) UpdateTask(id int64, title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, interval int) (Task, error) {
-	if len(metadata) == 0 {
-		metadata = json.RawMessage(`{}`)
-	}
-	if interval <= 0 {
-		interval = 1
-	}
-	var sd, ed *string
-	if startDate != "" {
-		sd = &startDate
-	}
-	if endDate != "" {
-		ed = &endDate
-	}
-	_, err := db.Exec(
-		db.q(`UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?, start_date = ?, end_date = ?, interval = ?, amount = ? WHERE id = ?`),
-		title, description, taskType, string(metadata), sd, ed, interval, amount, id,
-	)
-	if err != nil {
-		return Task{}, err
-	}
-	return db.GetTaskByID(id)
-}
-
 // UpdateTaskWithAmountBackfill updates a task and, when the amount changes,
 // stamps the previous amount onto past completions that held no per-completion override
 // (amount = ''). This preserves historical accuracy.
@@ -1572,12 +1548,7 @@ func (db *DB) GetSharesForTask(taskID int64) ([]SharedUser, error) {
 // LookupUsers returns users whose username contains the search string (case-insensitive),
 // excluding the given user. Used for the share-task autocomplete.
 func (db *DB) LookupUsers(query string, excludeUserID int64) ([]SharedUser, error) {
-	var pattern string
-	if db.driver == "postgres" {
-		pattern = "%" + strings.ToLower(query) + "%"
-	} else {
-		pattern = "%" + strings.ToLower(query) + "%"
-	}
+	pattern := "%" + strings.ToLower(query) + "%"
 	rows, err := db.Query(
 		db.q(`SELECT id, username FROM users WHERE lower(username) LIKE ? AND id != ? ORDER BY username ASC LIMIT 20`),
 		pattern, excludeUserID,

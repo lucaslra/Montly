@@ -461,7 +461,7 @@ body {
   font-size: 0.875rem;
 }
 
-.manage-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.manage-search:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
 
 .manage-type-filters {
   display: flex;
@@ -482,9 +482,9 @@ body {
 
 .type-filter-btn.active,
 .type-filter-btn:hover {
-  background: var(--accent);
+  background: var(--primary);
   color: #fff;
-  border-color: var(--accent);
+  border-color: var(--primary);
 }
 
 .type-filter-btn.type-filter-payment.active   { background: var(--badge-payment-text);      border-color: var(--badge-payment-text);      color: #fff; }
@@ -874,7 +874,7 @@ body {
   font-family: inherit;
 }
 
-.note-textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.note-textarea:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
 
 .note-actions {
   display: flex;
@@ -1726,7 +1726,7 @@ body {
   font-size: 0.875rem;
 }
 
-.export-month-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.export-month-input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
 
 .export-hint {
   font-size: 0.8rem;

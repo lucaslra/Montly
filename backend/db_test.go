@@ -344,7 +344,7 @@ func TestTaskCRUD(t *testing.T) {
 	}
 
 	// Update
-	updated, err := db.UpdateTask(task.ID, "New title", "new desc", "bill", "2026-02", "2026-11", "", nil, 3)
+	updated, err := db.UpdateTaskWithAmountBackfill(task.ID, "New title", "new desc", "bill", "2026-02", "2026-11", "", nil, 3)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
