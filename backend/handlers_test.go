@@ -68,6 +68,7 @@ func newTestServer(t *testing.T) *testServer {
 				r.Get("/users", uh.ListUsers)
 				r.Post("/users", uh.CreateUser)
 				r.Delete("/users/{id}", uh.DeleteUser)
+				r.Get("/audit-logs", h.ListAuditLogs)
 			})
 		})
 	}
@@ -2312,5 +2313,74 @@ func TestToggleCompletionWebhookActorVsOwner(t *testing.T) {
 
 		// Alice's webhook must fire (owner), not bob's (none).
 		cap.waitHit(t)
+	})
+}
+
+// ── ListAuditLogs ─────────────────────────────────────────────────────────────
+
+func TestListAuditLogs(t *testing.T) {
+	t.Run("non-admin gets 403", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/audit-logs", "", alice.ID, false))
+		assertStatus(t, w, http.StatusForbidden)
+	})
+
+	t.Run("admin gets 200 with logs array and total", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/audit-logs", "", admin.ID, true))
+		assertStatus(t, w, http.StatusOK)
+		var resp struct {
+			Logs  []any `json:"logs"`
+			Total int   `json:"total"`
+		}
+		decodeJSON(t, w, &resp)
+		if resp.Logs == nil {
+			t.Error("expected logs array, got nil")
+		}
+	})
+
+	t.Run("logs created by actions appear in the response", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		task := ts.mustTask(t, "Rent", admin.ID)
+		// Insert an audit log directly
+		ts.db.InsertAuditLog(admin.ID, "create", "task", task.ID, task.Title)
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/audit-logs", "", admin.ID, true))
+		assertStatus(t, w, http.StatusOK)
+		var resp struct {
+			Logs  []map[string]any `json:"logs"`
+			Total int              `json:"total"`
+		}
+		decodeJSON(t, w, &resp)
+		if resp.Total < 1 {
+			t.Errorf("expected total >= 1, got %d", resp.Total)
+		}
+	})
+
+	t.Run("pagination limit and offset are applied", func(t *testing.T) {
+		ts := newTestServer(t)
+		admin := ts.mustUser(t, "admin", true)
+		task := ts.mustTask(t, "Task", admin.ID)
+		// Insert 5 log entries
+		for i := 0; i < 5; i++ {
+			ts.db.InsertAuditLog(admin.ID, "action", "task", task.ID, fmt.Sprintf("item%d", i))
+		}
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/audit-logs?limit=2&offset=1", "", admin.ID, true))
+		assertStatus(t, w, http.StatusOK)
+		var resp struct {
+			Logs  []map[string]any `json:"logs"`
+			Total int              `json:"total"`
+		}
+		decodeJSON(t, w, &resp)
+		if len(resp.Logs) != 2 {
+			t.Errorf("expected 2 logs (limit=2), got %d", len(resp.Logs))
+		}
+		if resp.Total != 5 {
+			t.Errorf("expected total=5, got %d", resp.Total)
+		}
 	})
 }
