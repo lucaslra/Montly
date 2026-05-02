@@ -41,17 +41,48 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 
 ## Quick start
 
-**Requires:** Docker with Compose v2 (`docker compose`).
+### One-liner (try it out)
 
 ```bash
-git clone https://github.com/lucaslra/Montly.git
-cd Montly
+docker run -d \
+  --name montly \
+  -p 8080:8080 \
+  -v montly_data:/data \
+  -e SESSION_SECRET="$(openssl rand -base64 32)" \
+  ghcr.io/lucaslra/montly:latest
+```
+
+Open `http://localhost:8080` — you'll be prompted to create the admin account on first access.
+
+### Persistent install (recommended)
+
+Create a `docker-compose.yml`:
+
+```yaml
+services:
+  montly:
+    image: ghcr.io/lucaslra/montly:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - montly_data:/data
+    environment:
+      DATA_DIR: /data
+      SESSION_SECRET: "replace-with-output-of-openssl-rand-base64-32"
+      SECURE_COOKIES: "false"   # set to "true" when behind HTTPS
+    restart: unless-stopped
+
+volumes:
+  montly_data:
+```
+
+Then:
+
+```bash
 docker compose up -d
 ```
 
-Open `http://localhost:8080` — on first access you'll be prompted to create the admin account.
-
-> **HTTPS:** See [docs/deployment.md](docs/deployment.md) for reverse proxy setup (Caddy or nginx) and production configuration.
+> **HTTPS / production:** See [docs/deployment.md](docs/deployment.md) for reverse proxy setup (Caddy or nginx), PostgreSQL backend, backup procedures, and the full environment variable reference.
 
 ## Development
 
