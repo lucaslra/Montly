@@ -38,7 +38,7 @@
   <section class="hero">
     <div class="hero-inner">
       <div class="hero-text">
-        <a href="https://github.com/lucaslra/Montly/releases/tag/v0.12.0" class="version-badge">v0.12.0</a>
+        <a href="https://git.nlga.me/lucaslra/Montly/releases/tag/v0.16.0" class="version-badge">v0.16.0</a>
         <h1>Never miss a payment or subscription again.</h1>
         <p class="hero-sub">
           Montly tracks bills, subscriptions, payments, and reminders — month by month, automatically.
@@ -85,6 +85,11 @@
           <div class="feature-icon">&#128100;</div>
           <h3>Multi-user</h3>
           <p>Isolated data per user. Admin can create and delete accounts. Each user has their own settings and tasks.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128101;</div>
+          <h3>Task sharing</h3>
+          <p>Share individual tasks with other users. Collaborators see the task in their monthly view with a "shared by" badge and can toggle, skip, and attach receipts. Completions are shared state visible to all collaborators.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">&#128274;</div>
@@ -170,7 +175,7 @@ docker compose up -d</code></pre>
         </div>
         <div class="stack-item">
           <strong>SQLite / PostgreSQL</strong>
-          <span>SQLite by default (WAL mode, pure Go, no CGO) &middot; PostgreSQL also supported via <code>DB_TYPE=postgres</code></span>
+          <span>SQLite by default (pure Go, no CGO) &middot; PostgreSQL supported via <code>DB_TYPE=postgres</code></span>
         </div>
         <div class="stack-item">
           <strong>Docker</strong>
