@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -2381,6 +2382,68 @@ func TestListAuditLogs(t *testing.T) {
 		}
 		if resp.Total != 5 {
 			t.Errorf("expected total=5, got %d", resp.Total)
+		}
+	})
+}
+
+// ── ServeReceipt ──────────────────────────────────────────────────────────────
+
+func TestServeReceipt(t *testing.T) {
+	const validUUID = "550e8400-e29b-41d4-a716-446655440000.pdf"
+
+	t.Run("invalid filename returns 400", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/receipts/notauuid.txt", "", alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("valid filename not owned by user returns 404", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		// No completion with this receipt file in the DB.
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/receipts/"+validUUID, "", alice.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+
+	t.Run("valid filename owned by user but no file on disk returns 404", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Rent", alice.ID)
+		// Add completion with the receipt filename in the DB.
+		if _, err := ts.db.AddCompletion(task.ID, "2026-04"); err != nil {
+			t.Fatalf("AddCompletion: %v", err)
+		}
+		if _, err := ts.db.SetCompletionReceipt(task.ID, "2026-04", validUUID); err != nil {
+			t.Fatalf("SetCompletionReceipt: %v", err)
+		}
+		// File does not exist on disk — http.ServeFile returns 404.
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/receipts/"+validUUID, "", alice.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+	})
+
+	t.Run("valid filename owned by user with file on disk returns 200", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Rent", alice.ID)
+		if _, err := ts.db.AddCompletion(task.ID, "2026-04"); err != nil {
+			t.Fatalf("AddCompletion: %v", err)
+		}
+		if _, err := ts.db.SetCompletionReceipt(task.ID, "2026-04", validUUID); err != nil {
+			t.Fatalf("SetCompletionReceipt: %v", err)
+		}
+
+		// Create the actual file in the receipts dir.
+		content := []byte("fake pdf content")
+		if err := os.WriteFile(filepath.Join(ts.receiptsDir, validUUID), content, 0o644); err != nil {
+			t.Fatalf("write receipt file: %v", err)
+		}
+
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/receipts/"+validUUID, "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		cd := w.Header().Get("Content-Disposition")
+		if !strings.Contains(cd, "attachment") {
+			t.Errorf("Content-Disposition should contain 'attachment', got %q", cd)
 		}
 	})
 }
