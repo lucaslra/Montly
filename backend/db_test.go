@@ -1270,3 +1270,237 @@ func TestLookupUsersDB(t *testing.T) {
 		t.Errorf("case-insensitive: got %v, want [{bob}]", upper)
 	}
 }
+
+// ── GetReportData ─────────────────────────────────────────────────────────────
+
+func TestGetReportData(t *testing.T) {
+	t.Run("empty allMonths returns empty slice", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		result, err := db.GetReportData(user.ID, nil, nil)
+		if err != nil {
+			t.Fatalf("GetReportData: %v", err)
+		}
+		if len(result) != 0 {
+			t.Errorf("expected 0 results, got %d", len(result))
+		}
+	})
+
+	t.Run("task active in its start month appears correctly", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		_, err := db.CreateTask("Rent", "", "bill", "2026-03", "", nil, user.ID, 1)
+		if err != nil {
+			t.Fatalf("CreateTask: %v", err)
+		}
+		result, err := db.GetReportData(user.ID, []string{"2026-02", "2026-03"}, nil)
+		if err != nil {
+			t.Fatalf("GetReportData: %v", err)
+		}
+		if len(result) != 2 {
+			t.Fatalf("expected 2 months, got %d", len(result))
+		}
+		if len(result[0].Tasks) != 0 {
+			t.Errorf("2026-02: expected 0 tasks (before start), got %d", len(result[0].Tasks))
+		}
+		if len(result[1].Tasks) != 1 {
+			t.Errorf("2026-03: expected 1 task (on start), got %d", len(result[1].Tasks))
+		}
+	})
+
+	t.Run("interval=2 task appears every other month", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		_, err := db.CreateTask("Bimonthly", "", "", "2026-01", "", nil, user.ID, 2)
+		if err != nil {
+			t.Fatalf("CreateTask: %v", err)
+		}
+		months := []string{"2026-01", "2026-02", "2026-03", "2026-04", "2026-05"}
+		result, err := db.GetReportData(user.ID, months, nil)
+		if err != nil {
+			t.Fatalf("GetReportData: %v", err)
+		}
+		if len(result) != 5 {
+			t.Fatalf("expected 5 months, got %d", len(result))
+		}
+		// Task should appear in odd-indexed months: 2026-01, 2026-03, 2026-05
+		// and be absent from: 2026-02, 2026-04
+		for i, tc := range []struct {
+			month string
+			want  int
+		}{
+			{"2026-01", 1},
+			{"2026-02", 0},
+			{"2026-03", 1},
+			{"2026-04", 0},
+			{"2026-05", 1},
+		} {
+			if got := len(result[i].Tasks); got != tc.want {
+				t.Errorf("month %s: expected %d tasks, got %d", tc.month, tc.want, got)
+			}
+		}
+	})
+
+	t.Run("task with end_date excluded after its end", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		_, err := db.CreateTask("Short task", "", "", "2026-01", "2026-02", nil, user.ID, 1)
+		if err != nil {
+			t.Fatalf("CreateTask: %v", err)
+		}
+		result, err := db.GetReportData(user.ID, []string{"2026-02", "2026-03"}, nil)
+		if err != nil {
+			t.Fatalf("GetReportData: %v", err)
+		}
+		if len(result) != 2 {
+			t.Fatalf("expected 2 months, got %d", len(result))
+		}
+		if len(result[0].Tasks) != 1 {
+			t.Errorf("2026-02: expected 1 task (on end_date), got %d", len(result[0].Tasks))
+		}
+		if len(result[1].Tasks) != 0 {
+			t.Errorf("2026-03: expected 0 tasks (after end_date), got %d", len(result[1].Tasks))
+		}
+	})
+
+	t.Run("history month includes completions, forecast month has empty completions", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Pay rent", "", "payment", "2026-01", "", nil, user.ID, 1)
+		_, err := db.AddCompletion(task.ID, "2026-03")
+		if err != nil {
+			t.Fatalf("AddCompletion: %v", err)
+		}
+		result, err := db.GetReportData(user.ID, []string{"2026-03"}, []string{"2026-04"})
+		if err != nil {
+			t.Fatalf("GetReportData: %v", err)
+		}
+		if len(result) != 2 {
+			t.Fatalf("expected 2 months, got %d", len(result))
+		}
+		historyMonth := result[0]
+		forecastMonth := result[1]
+		if historyMonth.Month != "2026-03" {
+			t.Errorf("first month: got %q, want 2026-03", historyMonth.Month)
+		}
+		if historyMonth.IsForecast {
+			t.Error("2026-03 should not be forecast")
+		}
+		if len(historyMonth.Completions) == 0 {
+			t.Error("2026-03: expected non-empty completions for history month")
+		}
+		if forecastMonth.Month != "2026-04" {
+			t.Errorf("second month: got %q, want 2026-04", forecastMonth.Month)
+		}
+		if !forecastMonth.IsForecast {
+			t.Error("2026-04 should be forecast")
+		}
+		if len(forecastMonth.Completions) != 0 {
+			t.Errorf("2026-04: expected empty completions for forecast month, got %d", len(forecastMonth.Completions))
+		}
+	})
+
+	t.Run("shared task owned by another user appears in requester's report", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice, _ := db.CreateUser("alice", testHash(t), false)
+		bob, _ := db.CreateUser("bob", testHash(t), false)
+		task, _ := db.CreateTask("Alice task", "", "", "2026-01", "", nil, alice.ID, 1)
+		if err := db.AddShare(task.ID, bob.ID); err != nil {
+			t.Fatalf("AddShare: %v", err)
+		}
+		result, err := db.GetReportData(bob.ID, []string{"2026-01"}, nil)
+		if err != nil {
+			t.Fatalf("GetReportData for bob: %v", err)
+		}
+		if len(result) != 1 {
+			t.Fatalf("expected 1 month, got %d", len(result))
+		}
+		if len(result[0].Tasks) != 1 {
+			t.Errorf("bob's report: expected 1 task (shared), got %d", len(result[0].Tasks))
+		}
+	})
+
+	t.Run("forecast months exclude archived tasks", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		task, _ := db.CreateTask("Will be archived", "", "", "2026-01", "", nil, user.ID, 1)
+		if err := db.ArchiveTask(task.ID); err != nil {
+			t.Fatalf("ArchiveTask: %v", err)
+		}
+		result, err := db.GetReportData(user.ID, nil, []string{"2026-05"})
+		if err != nil {
+			t.Fatalf("GetReportData: %v", err)
+		}
+		if len(result) != 1 {
+			t.Fatalf("expected 1 month, got %d", len(result))
+		}
+		if len(result[0].Tasks) != 0 {
+			t.Errorf("forecast month: expected 0 tasks (archived excluded), got %d", len(result[0].Tasks))
+		}
+	})
+}
+
+// ── taskActiveInMonth ─────────────────────────────────────────────────────────
+
+func TestTaskActiveInMonth(t *testing.T) {
+	t.Run("no start_date anchors on created_at", func(t *testing.T) {
+		task := Task{
+			CreatedAt: "2026-03-01T00:00:00Z",
+			Interval:  1,
+		}
+		if !taskActiveInMonth(task, "2026-03") {
+			t.Error("expected task to be active in 2026-03 (created_at month)")
+		}
+		if taskActiveInMonth(task, "2026-02") {
+			t.Error("expected task to be inactive in 2026-02 (before created_at)")
+		}
+	})
+
+	t.Run("interval=3 fires every 3 months", func(t *testing.T) {
+		task := Task{
+			StartDate: "2026-01",
+			Interval:  3,
+			CreatedAt: "2026-01-01T00:00:00Z",
+		}
+		cases := []struct {
+			month string
+			want  bool
+		}{
+			{"2026-01", true},
+			{"2026-02", false},
+			{"2026-03", false},
+			{"2026-04", true},
+		}
+		for _, tc := range cases {
+			if got := taskActiveInMonth(task, tc.month); got != tc.want {
+				t.Errorf("month=%s: got %v, want %v", tc.month, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("end_date boundary: active on end month, inactive after", func(t *testing.T) {
+		task := Task{
+			StartDate: "2026-01",
+			EndDate:   "2026-03",
+			Interval:  1,
+			CreatedAt: "2026-01-01T00:00:00Z",
+		}
+		if !taskActiveInMonth(task, "2026-03") {
+			t.Error("expected task to be active in 2026-03 (on end_date)")
+		}
+		if taskActiveInMonth(task, "2026-04") {
+			t.Error("expected task to be inactive in 2026-04 (after end_date)")
+		}
+	})
+
+	t.Run("task created after queried month is inactive", func(t *testing.T) {
+		task := Task{
+			StartDate: "2026-05",
+			Interval:  1,
+			CreatedAt: "2026-05-01T00:00:00Z",
+		}
+		if taskActiveInMonth(task, "2026-04") {
+			t.Error("expected task to be inactive in 2026-04 (before start_date)")
+		}
+	})
+}
