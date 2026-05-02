@@ -2007,6 +2007,48 @@ func TestSkipCompletion(t *testing.T) {
 		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", skipBody, alice.ID, false))
 		assertStatus(t, w, http.StatusBadRequest)
 	})
+
+	t.Run("skip then toggle completes the task", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		task := ts.mustTask(t, "Gym", alice.ID)
+
+		// First skip the task.
+		skipBody := fmt.Sprintf(`{"task_id":%d,"month":"2026-04"}`, task.ID)
+		ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", skipBody, alice.ID, false))
+
+		// Now toggle it — should take the skipped→complete branch via CompleteSkipped.
+		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2026-04"}`, task.ID)
+		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", toggleBody, alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+
+		var resp map[string]bool
+		decodeJSON(t, w, &resp)
+		if !resp["completed"] {
+			t.Error("expected completed=true after toggling a skipped task")
+		}
+
+		// Verify via GET /api/completions that the completion is present and not skipped.
+		listW := ts.do(ts.authReq(t, http.MethodGet, "/api/completions?month=2026-04", "", alice.ID, false))
+		assertStatus(t, listW, http.StatusOK)
+		var completions []Completion
+		decodeJSON(t, listW, &completions)
+		found := false
+		for _, c := range completions {
+			if c.TaskID == task.ID {
+				found = true
+				if c.Skipped {
+					t.Error("completion should not be skipped after toggle")
+				}
+				if c.CompletedAt == "" {
+					t.Error("completion should have completed_at set")
+				}
+			}
+		}
+		if !found {
+			t.Errorf("completion for task %d not found in GET /api/completions response", task.ID)
+		}
+	})
 }
 
 // ── Receipt upload / download / delete ───────────────────────────────────────
