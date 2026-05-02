@@ -2333,6 +2333,69 @@ func TestSharedTaskAccess(t *testing.T) {
 	})
 }
 
+// ── GetReport ─────────────────────────────────────────────────────────────────
+
+func TestGetReport(t *testing.T) {
+	t.Run("returns 9 months with default anchor", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/report", "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var resp struct {
+			Months []any `json:"months"`
+		}
+		decodeJSON(t, w, &resp)
+		if len(resp.Months) != 9 {
+			t.Errorf("expected 9 months, got %d", len(resp.Months))
+		}
+	})
+
+	t.Run("anchor param controls the month range", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/report?anchor=2025-06", "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var resp struct {
+			Months []map[string]any `json:"months"`
+		}
+		decodeJSON(t, w, &resp)
+		if len(resp.Months) != 9 {
+			t.Fatalf("expected 9 months, got %d", len(resp.Months))
+		}
+		// History: addReportMonth("2025-06", -(6-i)) for i=0..5 → delta -6..-1
+		// i=0: delta=-6 → 2024-12; i=5: delta=-1 → 2025-05
+		// Forecast: addReportMonth("2025-06", i+1) for i=0..2 → delta 1..3
+		// i=0: delta=1 → 2025-07; i=2: delta=3 → 2025-09
+		if got := resp.Months[0]["month"]; got != "2024-12" {
+			t.Errorf("first month: got %q, want 2024-12", got)
+		}
+		if got := resp.Months[8]["month"]; got != "2025-09" {
+			t.Errorf("last month: got %q, want 2025-09", got)
+		}
+	})
+
+	t.Run("invalid anchor returns 400", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodGet, "/api/report?anchor=notvalid", "", alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("addReportMonth year boundary Dec+1=Jan next year", func(t *testing.T) {
+		got := addReportMonth("2025-12", 1)
+		if got != "2026-01" {
+			t.Errorf("addReportMonth(2025-12, 1): got %q, want 2026-01", got)
+		}
+	})
+
+	t.Run("addReportMonth year boundary Jan-1=Dec prev year", func(t *testing.T) {
+		got := addReportMonth("2026-01", -1)
+		if got != "2025-12" {
+			t.Errorf("addReportMonth(2026-01, -1): got %q, want 2025-12", got)
+		}
+	})
+}
+
 // ── Webhook fires against task owner when a shared user acts ─────────────────
 
 func TestToggleCompletionWebhookActorVsOwner(t *testing.T) {
