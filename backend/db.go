@@ -252,6 +252,8 @@ func migratePostgres(db *sql.DB) error {
 }
 
 func migrate(db *sql.DB) error {
+	applied := 0
+
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
 			id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -304,27 +306,32 @@ func migrate(db *sql.DB) error {
 	`); err != nil {
 		return err
 	}
+
 	// Idempotent column additions for existing databases.
 	// "duplicate column" (SQLite) is the expected error when the column already exists.
-	for _, stmt := range []string{
-		`ALTER TABLE tasks ADD COLUMN type        TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN metadata    TEXT NOT NULL DEFAULT '{}'`,
-		`ALTER TABLE tasks ADD COLUMN start_date  TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN end_date    TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN user_id     INTEGER REFERENCES users(id)`,
-		`ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`,
-		`ALTER TABLE tasks ADD COLUMN archived_at TEXT`,
-		`ALTER TABLE tasks ADD COLUMN amount      TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE completions ADD COLUMN receipt_file TEXT    NOT NULL DEFAULT ''`,
-		`ALTER TABLE completions ADD COLUMN amount       TEXT    NOT NULL DEFAULT ''`,
-		`ALTER TABLE completions ADD COLUMN note         TEXT    NOT NULL DEFAULT ''`,
-		`ALTER TABLE completions ADD COLUMN skipped      INTEGER NOT NULL DEFAULT 0`,
+	type colStep struct{ desc, stmt string }
+	for _, s := range []colStep{
+		{"tasks.type", `ALTER TABLE tasks ADD COLUMN type        TEXT NOT NULL DEFAULT ''`},
+		{"tasks.metadata", `ALTER TABLE tasks ADD COLUMN metadata    TEXT NOT NULL DEFAULT '{}'`},
+		{"tasks.start_date", `ALTER TABLE tasks ADD COLUMN start_date  TEXT NOT NULL DEFAULT ''`},
+		{"tasks.end_date", `ALTER TABLE tasks ADD COLUMN end_date    TEXT NOT NULL DEFAULT ''`},
+		{"tasks.user_id", `ALTER TABLE tasks ADD COLUMN user_id     INTEGER REFERENCES users(id)`},
+		{"tasks.interval", `ALTER TABLE tasks ADD COLUMN interval    INTEGER NOT NULL DEFAULT 1`},
+		{"tasks.archived_at", `ALTER TABLE tasks ADD COLUMN archived_at TEXT`},
+		{"tasks.amount", `ALTER TABLE tasks ADD COLUMN amount      TEXT NOT NULL DEFAULT ''`},
+		{"completions.receipt_file", `ALTER TABLE completions ADD COLUMN receipt_file TEXT    NOT NULL DEFAULT ''`},
+		{"completions.amount", `ALTER TABLE completions ADD COLUMN amount       TEXT    NOT NULL DEFAULT ''`},
+		{"completions.note", `ALTER TABLE completions ADD COLUMN note         TEXT    NOT NULL DEFAULT ''`},
+		{"completions.skipped", `ALTER TABLE completions ADD COLUMN skipped      INTEGER NOT NULL DEFAULT 0`},
 	} {
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := db.Exec(s.stmt); err != nil {
 			msg := err.Error()
 			if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "already exists") {
 				return fmt.Errorf("migration: %w", err)
 			}
+		} else {
+			log.Printf("migration: added column %s", s.desc)
+			applied++
 		}
 	}
 
@@ -334,6 +341,7 @@ func migrate(db *sql.DB) error {
 	var notNull int
 	db.QueryRow(`SELECT "notnull" FROM pragma_table_info('tasks') WHERE name='start_date'`).Scan(&notNull)
 	if notNull == 1 {
+		log.Printf("migration: rebuilding tasks table (converting date columns to nullable)")
 		db.Exec(`PRAGMA foreign_keys = OFF`)           //nolint:errcheck
 		defer db.Exec(`PRAGMA foreign_keys = ON`)       //nolint:errcheck
 		tx, err := db.Begin()
@@ -369,6 +377,7 @@ func migrate(db *sql.DB) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit tasks rebuild: %w", err)
 		}
+		applied++
 	}
 
 	// One-time repair: fix completions FK broken by a previous migration run that
@@ -376,6 +385,7 @@ func migrate(db *sql.DB) error {
 	var fkTable string
 	db.QueryRow(`SELECT "table" FROM pragma_foreign_key_list('completions') LIMIT 1`).Scan(&fkTable)
 	if fkTable == "tasks_old" {
+		log.Printf("migration: repairing completions foreign key (was pointing to tasks_old)")
 		db.Exec(`PRAGMA foreign_keys = OFF`)           //nolint:errcheck
 		defer db.Exec(`PRAGMA foreign_keys = ON`)       //nolint:errcheck
 		tx, err := db.Begin()
@@ -407,6 +417,7 @@ func migrate(db *sql.DB) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit completions repair: %w", err)
 		}
+		applied++
 	}
 
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_completions_task_month ON completions(task_id, month)`)
@@ -414,14 +425,34 @@ func migrate(db *sql.DB) error {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`)
+
 	// Backfill amount from metadata JSON for existing rows.
-	db.Exec(`UPDATE tasks SET amount = COALESCE(json_extract(metadata, '$.amount'), '') WHERE amount = ''`)
+	if res, err := db.Exec(`UPDATE tasks SET amount = COALESCE(json_extract(metadata, '$.amount'), '') WHERE amount = ''`); err == nil {
+		if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("migration: backfilled amount from metadata for %d task(s)", n)
+			applied++
+		}
+	}
+
+	var hasTaskShares int
+	db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='task_shares'`).Scan(&hasTaskShares)
+	if hasTaskShares == 0 {
+		log.Printf("migration: creating task_shares table")
+		applied++
+	}
 	db.Exec(`CREATE TABLE IF NOT EXISTS task_shares (
 		task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		PRIMARY KEY (task_id, user_id)
 	)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_shares_user_id ON task_shares(user_id)`)
+
+	var hasAuditLogs int
+	db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_logs'`).Scan(&hasAuditLogs)
+	if hasAuditLogs == 0 {
+		log.Printf("migration: creating audit_logs table")
+		applied++
+	}
 	db.Exec(`CREATE TABLE IF NOT EXISTS audit_logs (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id      INTEGER NOT NULL,
@@ -433,6 +464,11 @@ func migrate(db *sql.DB) error {
 	)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`)
 
+	if applied == 0 {
+		log.Printf("migration: schema up to date, no migrations needed")
+	} else {
+		log.Printf("migration: complete (%d step(s) applied)", applied)
+	}
 	return nil
 }
 
@@ -453,8 +489,10 @@ func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 		return fmt.Errorf("check settings schema: %w", err)
 	}
 	if hasUserID > 0 {
-		return nil // already migrated
+		log.Printf("migration: settings table already user-scoped, skipping")
+		return nil
 	}
+	log.Printf("migration: migrating settings table to user-scoped schema")
 
 	insertStmt := db.q(`INSERT INTO settings SELECT ?, key, value FROM settings_old`)
 
