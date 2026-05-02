@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.18.0] — 2026-05-02
+
+### Added
+- **Dependabot** — automated weekly dependency updates for Go modules, npm packages, and GitHub Actions.
+- **GitHub issue and PR templates** — bug report, feature request, and pull request templates added under `.github/`.
+
+### Changed
+- **README** — website badge added; simplified Docker one-liner and persistent-install compose snippet in Quick Start.
+
+### Dependencies
+- Vite v6 → v8, `@vitejs/plugin-react` v4 → v6 (combined — v6 requires Vite ≥ 8)
+- `modernc.org/sqlite` v1.33.1 → v1.50.0; `go-chi/chi` v5.1.0 → v5.2.5
+- `jsdom` v29.0.2 → v29.1.1
+- GitHub Actions: `actions/checkout` v4 → v6, `setup-go` v5 → v6, `setup-node` v4 → v6, `docker/setup-buildx-action` v3 → v4, `docker/login-action` v3 → v4
+
 ## [0.17.0] — 2026-05-02
 
 ### Security
