@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased] — v0.17.0
+
+### Security
+- **Request body size limits** — `parseTaskBody`, `CreateWebhook`, and `CreateUser` now cap request bodies before decoding (16 KB / 4 KB respectively), preventing memory exhaustion via oversized payloads
+- **bcrypt password length cap** — passwords are now rejected above 72 characters at all entry points (setup, create user, change password); bcrypt silently truncates at byte 72, which would allow any input sharing the first 72 bytes to authenticate as the same account
+- **SSRF protection for webhooks** — webhook delivery resolves hostnames before connecting and rejects any IP in loopback, RFC 1918, link-local (covers cloud metadata endpoints like 169.254.169.254), carrier-grade NAT, and IPv6 unique-local ranges; redirects are re-validated at each hop and capped at 3
+
+### Added
+- **Migration step logging** — startup now logs each schema change as it runs, or confirms "migration: schema up to date" when nothing needs applying
+
+## [0.16.0] — 2026-05-02
+
+### Added
+- **Amount as first-class column** — `tasks.amount` is now a dedicated column instead of being embedded in `metadata` JSON. `PUT /api/tasks/:id` backfills historical completions automatically: when a task's default amount changes, past completions with no per-entry override have the old amount stamped onto them, preserving historical accuracy.
+
+### Changed
+- Test suite significantly expanded — 9 new backend test PRs covering report pipeline, webhook handler, `FireMonthDigest`, audit log handler, receipt serving, settings validation, `CompleteSkipped` toggle path, TaskList, App.jsx mutations; backend handler test count roughly doubled
+
+### Fixed
+- Removed dead code: `db.UpdateTask` (superseded by `UpdateTaskWithAmountBackfill`), collapsed identical `LookupUsers` driver branch
+- Fixed 5 CSS rules using undefined `var(--accent)` CSS variable — replaced with `var(--primary)`
+
+### Tests
+- Added E2E spec `05-sharing.spec.ts` — 14 tests covering shared task list visibility, collaborator add/remove, shared toggle, and archive flows; total E2E suite now 86 tests across 5 specs
+
 ## [0.15.0] — 2026-04-30
 
 ### Added
