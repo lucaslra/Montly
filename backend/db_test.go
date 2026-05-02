@@ -607,7 +607,7 @@ func TestCompleteSkipped(t *testing.T) {
 	t.Run("skip then CompleteSkipped marks as done", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Gym", "", "reminder", "2026-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Gym", "", "reminder", "2026-01", "", "", nil, user.ID, 1)
 
 		_, _, err := db.SkipCompletion(task.ID, "2026-03")
 		if err != nil {
@@ -637,7 +637,7 @@ func TestCompleteSkipped(t *testing.T) {
 	t.Run("CompleteSkipped on nonexistent row is a no-op", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Gym", "", "reminder", "2026-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Gym", "", "reminder", "2026-01", "", "", nil, user.ID, 1)
 
 		_, err := db.CompleteSkipped(task.ID, "2026-05")
 		if err != nil {
