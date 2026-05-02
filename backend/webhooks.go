@@ -309,11 +309,10 @@ func FireMonthDigest(db *DB, month string) {
 		items := make([]digestTaskItem, 0, len(tasks))
 		var total float64
 		for _, t := range tasks {
-			amt := extractAmount(string(t.Metadata))
-			if v, err := strconv.ParseFloat(amt, 64); err == nil {
+			if v, err := strconv.ParseFloat(t.Amount, 64); err == nil {
 				total += v
 			}
-			items = append(items, digestTaskItem{ID: t.ID, Title: t.Title, Type: t.Type, Amount: amt})
+			items = append(items, digestTaskItem{ID: t.ID, Title: t.Title, Type: t.Type, Amount: t.Amount})
 		}
 		var totalStr string
 		if total > 0 {

@@ -36,14 +36,14 @@ function calcActual(tasks, cmap) {
     .filter(t => MONETARY_TYPES.includes(t.type) && cmap.has(t.id))
     .reduce((sum, t) => {
       const c = cmap.get(t.id)
-      return sum + (parseFloat(c.amount || t.metadata?.amount || '') || 0)
+      return sum + (parseFloat(c.amount || t.amount || '') || 0)
     }, 0)
 }
 
 function calcExpected(tasks) {
   return tasks
     .filter(t => MONETARY_TYPES.includes(t.type))
-    .reduce((sum, t) => sum + (parseFloat(t.metadata?.amount || '') || 0), 0)
+    .reduce((sum, t) => sum + (parseFloat(t.amount || '') || 0), 0)
 }
 
 function calcByCategory(tasks, cmap) {
@@ -52,7 +52,7 @@ function calcByCategory(tasks, cmap) {
     .filter(t => MONETARY_TYPES.includes(t.type) && cmap.has(t.id))
     .forEach(t => {
       const c = cmap.get(t.id)
-      acc[t.type] += parseFloat(c.amount || t.metadata?.amount || '') || 0
+      acc[t.type] += parseFloat(c.amount || t.amount || '') || 0
     })
   return acc
 }

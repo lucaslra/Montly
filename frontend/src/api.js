@@ -40,18 +40,18 @@ export const updateSettings = (settings) =>
 export const fetchTasks = (month, signal) =>
   request(`/tasks?month=${encodeURIComponent(month)}`, signal ? { signal } : {})
 
-export const createTask = (title, description, type, metadata, startDate, endDate, interval = 1) =>
+export const createTask = (title, description, type, amount, metadata, startDate, endDate, interval = 1) =>
   request('/tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, description, type, metadata, start_date: startDate ?? '', end_date: endDate ?? '', interval }),
+    body: JSON.stringify({ title, description, type, amount, metadata, start_date: startDate ?? '', end_date: endDate ?? '', interval }),
   })
 
-export const updateTask = (id, title, description, type, metadata, startDate, endDate, interval = 1) =>
+export const updateTask = (id, title, description, type, amount, metadata, startDate, endDate, interval = 1) =>
   request(`/tasks/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, description, type, metadata, start_date: startDate ?? '', end_date: endDate ?? '', interval }),
+    body: JSON.stringify({ title, description, type, amount, metadata, start_date: startDate ?? '', end_date: endDate ?? '', interval }),
   })
 
 export const deleteTask = (id) =>

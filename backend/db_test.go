@@ -81,7 +81,7 @@ func TestTaskScoping(t *testing.T) {
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
 	// Use an explicit start_date so the task always appears regardless of when the test runs.
-	_, err := db.CreateTask("Alice task", "", "", "2020-01", "", nil, alice.ID, 1)
+	_, err := db.CreateTask("Alice task", "", "", "2020-01", "", "", nil, alice.ID, 1)
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestCompletionScoping(t *testing.T) {
 	alice, _ := db.CreateUser("alice", testHash(t), false)
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
-	task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, alice.ID, 1)
+	task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
 	_, err := db.AddCompletion(task.ID, "2026-04")
 	if err != nil {
 		t.Fatalf("add completion: %v", err)
@@ -320,7 +320,7 @@ func TestTaskCRUD(t *testing.T) {
 	user, _ := db.CreateUser("alice", testHash(t), false)
 
 	// Create
-	task, err := db.CreateTask("Pay rent", "monthly rent", "payment", "2026-01", "2026-12", nil, user.ID, 1)
+	task, err := db.CreateTask("Pay rent", "monthly rent", "payment", "2026-01", "2026-12", "", nil, user.ID, 1)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestTaskCRUD(t *testing.T) {
 	}
 
 	// Update
-	updated, err := db.UpdateTask(task.ID, "New title", "new desc", "bill", "2026-02", "2026-11", nil, 3)
+	updated, err := db.UpdateTask(task.ID, "New title", "new desc", "bill", "2026-02", "2026-11", "", nil, 3)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -381,11 +381,11 @@ func TestUpdateTaskWithAmountBackfill(t *testing.T) {
 	t.Run("stamps old amount onto empty-amount completions", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), user.ID, 1)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", "10", nil, user.ID, 1)
 		db.AddCompletion(task.ID, "2026-01")
 		db.AddCompletion(task.ID, "2026-02")
 
-		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"11"}`), task.Interval); err != nil {
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, "11", nil, task.Interval); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 
@@ -403,11 +403,11 @@ func TestUpdateTaskWithAmountBackfill(t *testing.T) {
 	t.Run("manual per-completion overrides are not touched", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), user.ID, 1)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", "10", nil, user.ID, 1)
 		db.AddCompletion(task.ID, "2026-01")
 		db.SetCompletionAmount(task.ID, "2026-01", "9") // manual override
 
-		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"11"}`), task.Interval); err != nil {
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, "11", nil, task.Interval); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 
@@ -420,10 +420,10 @@ func TestUpdateTaskWithAmountBackfill(t *testing.T) {
 	t.Run("non-amount changes do not touch completions", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), user.ID, 1)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", "10", nil, user.ID, 1)
 		db.AddCompletion(task.ID, "2026-01")
 
-		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, "New Title", task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"10"}`), task.Interval); err != nil {
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, "New Title", task.Description, task.Type, task.StartDate, task.EndDate, "10", nil, task.Interval); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 
@@ -436,10 +436,10 @@ func TestUpdateTaskWithAmountBackfill(t *testing.T) {
 	t.Run("no previous amount set means no backfill", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Netflix", "", "subscription", "2026-01", "", "", nil, user.ID, 1)
 		db.AddCompletion(task.ID, "2026-01")
 
-		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, json.RawMessage(`{"amount":"11"}`), task.Interval); err != nil {
+		if _, err := db.UpdateTaskWithAmountBackfill(task.ID, task.Title, task.Description, task.Type, task.StartDate, task.EndDate, "11", nil, task.Interval); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 
@@ -455,7 +455,7 @@ func TestGetTasks_StartDateFilter(t *testing.T) {
 	user, _ := db.CreateUser("alice", testHash(t), false)
 
 	// Task with start_date "2026-03" should not appear in earlier months.
-	db.CreateTask("March task", "", "", "2026-03", "", nil, user.ID, 1)
+	db.CreateTask("March task", "", "", "2026-03", "", "", nil, user.ID, 1)
 
 	before, _ := db.GetTasks("2026-02", user.ID)
 	if len(before) != 0 {
@@ -477,7 +477,7 @@ func TestGetTasks_EndDateFilter(t *testing.T) {
 	db := setupTestDB(t)
 	user, _ := db.CreateUser("alice", testHash(t), false)
 
-	db.CreateTask("Expiring task", "", "", "2026-01", "2026-02", nil, user.ID, 1)
+	db.CreateTask("Expiring task", "", "", "2026-01", "2026-02", "", nil, user.ID, 1)
 
 	within, _ := db.GetTasks("2026-02", user.ID)
 	if len(within) != 1 {
@@ -495,7 +495,7 @@ func TestGetTasks_IntervalFilter(t *testing.T) {
 	user, _ := db.CreateUser("alice", testHash(t), false)
 
 	// Quarterly task (interval=3) anchored at 2026-01.
-	db.CreateTask("Quarterly", "", "", "2026-01", "", nil, user.ID, 3)
+	db.CreateTask("Quarterly", "", "", "2026-01", "", "", nil, user.ID, 3)
 
 	cases := []struct {
 		month string
@@ -523,7 +523,7 @@ func TestGetTasks_IntervalFilter(t *testing.T) {
 func TestCompletionCRUD(t *testing.T) {
 	db := setupTestDB(t)
 	user, _ := db.CreateUser("alice", testHash(t), false)
-	task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, user.ID, 1)
+	task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", "", nil, user.ID, 1)
 
 	// AddCompletion
 	c, err := db.AddCompletion(task.ID, "2026-04")
@@ -604,7 +604,7 @@ func TestCompletionCRUD(t *testing.T) {
 func TestGetCompletion_NotFound(t *testing.T) {
 	db := setupTestDB(t)
 	user, _ := db.CreateUser("alice", testHash(t), false)
-	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 	_, found, err := db.GetCompletion(task.ID, "2026-04")
 	if err != nil {
@@ -620,7 +620,7 @@ func TestGetCompletion_NotFound(t *testing.T) {
 func TestGetReceiptsForTask(t *testing.T) {
 	db := setupTestDB(t)
 	user, _ := db.CreateUser("alice", testHash(t), false)
-	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 	db.AddCompletion(task.ID, "2026-01")
 	db.AddCompletion(task.ID, "2026-02")
@@ -646,9 +646,9 @@ func TestGetCompletionsForExport(t *testing.T) {
 	alice, _ := db.CreateUser("alice", testHash(t), false)
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
-	taskA, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, alice.ID, 1)
-	taskB, _ := db.CreateTask("Internet", "", "subscription", "2020-01", "", nil, alice.ID, 1)
-	taskBob, _ := db.CreateTask("Bob task", "", "", "2020-01", "", nil, bob.ID, 1)
+	taskA, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
+	taskB, _ := db.CreateTask("Internet", "", "subscription", "2020-01", "", "", nil, alice.ID, 1)
+	taskBob, _ := db.CreateTask("Bob task", "", "", "2020-01", "", "", nil, bob.ID, 1)
 
 	db.AddCompletion(taskA.ID, "2026-01")
 	db.AddCompletion(taskA.ID, "2026-03")
@@ -711,7 +711,7 @@ func TestReceiptBelongsToUser(t *testing.T) {
 	alice, _ := db.CreateUser("alice", testHash(t), false)
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
-	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, alice.ID, 1)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, alice.ID, 1)
 	db.AddCompletion(task.ID, "2026-04")
 	receipt := "550e8400-e29b-41d4-a716-446655440000.pdf"
 	db.SetCompletionReceipt(task.ID, "2026-04", receipt)
@@ -817,7 +817,7 @@ func TestImportCompletionsCSV(t *testing.T) {
 	}
 	mustTask := func(t *testing.T, db *DB, title string, userID int64) Task {
 		t.Helper()
-		task, err := db.CreateTask(title, "", "payment", "", "", json.RawMessage(`{}`), userID, 1)
+		task, err := db.CreateTask(title, "", "payment", "", "", "", json.RawMessage(`{}`), userID, 1)
 		if err != nil {
 			t.Fatalf("createTask %s: %v", title, err)
 		}
@@ -963,7 +963,7 @@ func TestImportCompletionsCSV(t *testing.T) {
 func TestArchiveTaskDB(t *testing.T) {
 	db := setupTestDB(t)
 	user, _ := db.CreateUser("alice", testHash(t), false)
-	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 	active, _ := db.GetTasks("9999-12", user.ID)
 	if len(active) != 1 {
@@ -1010,7 +1010,7 @@ func TestGetArchivedTasks_UserScoped(t *testing.T) {
 	alice, _ := db.CreateUser("alice", testHash(t), false)
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
-	aliceTask, _ := db.CreateTask("Alice task", "", "", "2020-01", "", nil, alice.ID, 1)
+	aliceTask, _ := db.CreateTask("Alice task", "", "", "2020-01", "", "", nil, alice.ID, 1)
 	db.ArchiveTask(aliceTask.ID)
 
 	bobArchived, _ := db.GetArchivedTasks(bob.ID)
@@ -1079,7 +1079,7 @@ func TestTaskSharesDB(t *testing.T) {
 	db := setupTestDB(t)
 	alice, _ := db.CreateUser("alice", testHash(t), false)
 	bob, _ := db.CreateUser("bob", testHash(t), false)
-	task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, alice.ID, 1)
+	task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, alice.ID, 1)
 
 	// Initially not shared.
 	shared, err := db.IsSharedWith(task.ID, bob.ID)
@@ -1147,7 +1147,7 @@ func TestGetTasks_SharedTask(t *testing.T) {
 	alice, _ := db.CreateUser("alice", testHash(t), false)
 	bob, _ := db.CreateUser("bob", testHash(t), false)
 
-	task, _ := db.CreateTask("Shared task", "", "", "2020-01", "", nil, alice.ID, 1)
+	task, _ := db.CreateTask("Shared task", "", "", "2020-01", "", "", nil, alice.ID, 1)
 
 	// Before sharing, bob sees 0 tasks.
 	bobTasks, _ := db.GetTasks("9999-12", bob.ID)

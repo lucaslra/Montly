@@ -67,7 +67,7 @@ describe('ManageView', () => {
 
   it('shows formatted monetary amount for payment-type tasks', () => {
     const tasks = [
-      makeTask({ id: 1, title: 'Rent', type: 'bill', metadata: { amount: '850' } }),
+      makeTask({ id: 1, title: 'Rent', type: 'bill', amount: '850' }),
     ]
     renderManage(tasks, { currency: '$', numberFormat: 'en' })
     expect(screen.getByText('$850.00')).toBeInTheDocument()
@@ -75,7 +75,7 @@ describe('ManageView', () => {
 
   it('does not show amount for reminder-type tasks', () => {
     const tasks = [
-      makeTask({ id: 1, title: 'Call mum', type: 'reminder', metadata: { amount: '99' } }),
+      makeTask({ id: 1, title: 'Call mum', type: 'reminder', amount: '99' }),
     ]
     renderManage(tasks)
     expect(screen.queryByText(/\$99/)).not.toBeInTheDocument()
@@ -203,7 +203,7 @@ describe('ManageView', () => {
     await userEvent.type(titleInput, 'Netflix HD')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(onUpdate).toHaveBeenCalledWith(7, 'Netflix HD', '', 'reminder', expect.anything(), '', '', 1)
+      expect(onUpdate).toHaveBeenCalledWith(7, 'Netflix HD', '', 'reminder', '', expect.anything(), '', '', 1)
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
@@ -224,7 +224,7 @@ describe('ManageView', () => {
     await userEvent.type(screen.getByLabelText('Title'), 'New Sub')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(onCreate).toHaveBeenCalledWith('New Sub', '', '', expect.anything(), '', '', 1)
+      expect(onCreate).toHaveBeenCalledWith('New Sub', '', '', '', expect.anything(), '', '', 1)
     )
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })

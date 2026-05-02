@@ -317,6 +317,7 @@ type taskBody struct {
 	Title       string
 	Description string
 	Type        string
+	Amount      string
 	Metadata    json.RawMessage
 	StartDate   string
 	EndDate     string
@@ -330,6 +331,7 @@ func parseTaskBody(w http.ResponseWriter, r *http.Request) (taskBody, bool) {
 		Title       string          `json:"title"`
 		Description string          `json:"description"`
 		Type        string          `json:"type"`
+		Amount      string          `json:"amount"`
 		Metadata    json.RawMessage `json:"metadata"`
 		StartDate   string          `json:"start_date"`
 		EndDate     string          `json:"end_date"`
@@ -378,10 +380,17 @@ func parseTaskBody(w http.ResponseWriter, r *http.Request) (taskBody, bool) {
 		writeError(w, "interval must be one of: 1, 2, 3, 6, 12", http.StatusBadRequest)
 		return taskBody{}, false
 	}
+	if raw.Amount != "" {
+		if _, err := strconv.ParseFloat(raw.Amount, 64); err != nil {
+			writeError(w, "amount must be a number", http.StatusBadRequest)
+			return taskBody{}, false
+		}
+	}
 	return taskBody{
 		Title:       raw.Title,
 		Description: raw.Description,
 		Type:        raw.Type,
+		Amount:      raw.Amount,
 		Metadata:    raw.Metadata,
 		StartDate:   raw.StartDate,
 		EndDate:     raw.EndDate,
@@ -395,7 +404,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := currentUser(r).UserID
-	task, err := h.db.CreateTask(req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, userID, req.Interval)
+	task, err := h.db.CreateTask(req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Amount, req.Metadata, userID, req.Interval)
 	if err != nil {
 		writeServerError(w, "failed to create task", err)
 		return
@@ -417,7 +426,7 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	task, err := h.db.UpdateTaskWithAmountBackfill(id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Metadata, req.Interval)
+	task, err := h.db.UpdateTaskWithAmountBackfill(id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Amount, req.Metadata, req.Interval)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "task not found", http.StatusNotFound)
 		return

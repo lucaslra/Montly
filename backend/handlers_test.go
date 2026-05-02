@@ -127,7 +127,7 @@ func (ts *testServer) mustUser(t *testing.T, username string, isAdmin bool) User
 // mustTask creates a task in the test DB and fails the test if it errors.
 func (ts *testServer) mustTask(t *testing.T, title string, userID int64) Task {
 	t.Helper()
-	task, err := ts.db.CreateTask(title, "", "", "2020-01", "", nil, userID, 1)
+	task, err := ts.db.CreateTask(title, "", "", "2020-01", "", "", nil, userID, 1)
 	if err != nil {
 		t.Fatalf("create task %q: %v", title, err)
 	}
@@ -547,13 +547,13 @@ func TestUpdateTask(t *testing.T) {
 	t.Run("amount change backfills past completions", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		task, _ := ts.db.CreateTask("Netflix", "", "subscription", "2026-01", "", json.RawMessage(`{"amount":"10"}`), alice.ID, 1)
+		task, _ := ts.db.CreateTask("Netflix", "", "subscription", "2026-01", "", "10", nil, alice.ID, 1)
 		ts.db.AddCompletion(task.ID, "2026-01")
 		ts.db.AddCompletion(task.ID, "2026-02")
 
 		w := ts.do(ts.authReq(t, http.MethodPut,
 			fmt.Sprintf("/api/tasks/%d", task.ID),
-			`{"title":"Netflix","metadata":{"amount":"11"}}`,
+			`{"title":"Netflix","amount":"11"}`,
 			alice.ID, false))
 		assertStatus(t, w, http.StatusOK)
 
@@ -923,7 +923,7 @@ func TestImportCSV(t *testing.T) {
 	t.Run("round-trip: export then import produces same completions", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		task, _ := ts.db.CreateTask("Rent", "", "payment", "2020-01", "", nil, alice.ID, 1)
+		task, _ := ts.db.CreateTask("Rent", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
 		ts.db.AddCompletion(task.ID, "2026-03")
 		ts.db.SetCompletionAmount(task.ID, "2026-03", "800")
 
@@ -998,7 +998,7 @@ func TestImportCSV(t *testing.T) {
 	t.Run("upsert: re-import updates existing completion", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		task, _ := ts.db.CreateTask("Phone", "", "payment", "2020-01", "", nil, alice.ID, 1)
+		task, _ := ts.db.CreateTask("Phone", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
 		ts.db.AddCompletion(task.ID, "2026-01")
 		ts.db.SetCompletionAmount(task.ID, "2026-01", "20")
 
@@ -1725,7 +1725,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 	t.Run("delivers payload with correct fields", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
@@ -1759,7 +1759,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 	t.Run("sets correct Content-Type header", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
@@ -1776,7 +1776,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 	t.Run("includes HMAC signature when secret is set", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 		secret := "webhook-secret-123"
 
 		cap := newWebhookCapture()
@@ -1804,7 +1804,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 	t.Run("no signature header when secret is empty", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
@@ -1823,7 +1823,7 @@ func TestFireWebhooks_EventFilter(t *testing.T) {
 	t.Run("only fires webhook subscribed to the matching event", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		completedCap := newWebhookCapture()
 		defer completedCap.close()
@@ -1843,7 +1843,7 @@ func TestFireWebhooks_EventFilter(t *testing.T) {
 	t.Run("fires webhook subscribed to both events", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
@@ -1856,7 +1856,7 @@ func TestFireWebhooks_EventFilter(t *testing.T) {
 	t.Run("does not fire when user has no webhooks", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()

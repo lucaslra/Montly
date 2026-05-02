@@ -78,7 +78,7 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
                 <PaymentSlot
                   taskId={task.id}
                   taskType={task.type}
-                  defaultAmount={task.metadata?.amount ?? ''}
+                  defaultAmount={task.amount ?? ''}
                   completion={completion}
                   currency={currency}
                   isUploading={uploadingTaskId === task.id}

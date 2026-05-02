@@ -37,16 +37,16 @@ export default function ManageView({ tasks, currency = '$', numberFormat = 'en',
       .finally(() => setLoadingArchived(false))
   }, [showArchived])
 
-  async function handleCreate(title, description, type, metadata, startDate, endDate, interval) {
+  async function handleCreate(title, description, type, amount, metadata, startDate, endDate, interval) {
     try {
-      await onCreate(title, description, type, metadata, startDate, endDate, interval)
+      await onCreate(title, description, type, amount, metadata, startDate, endDate, interval)
       setAdding(false)
     } catch { /* error shown by App */ }
   }
 
-  async function handleUpdate(title, description, type, metadata, startDate, endDate, interval) {
+  async function handleUpdate(title, description, type, amount, metadata, startDate, endDate, interval) {
     try {
-      await onUpdate(editing.id, title, description, type, metadata, startDate, endDate, interval)
+      await onUpdate(editing.id, title, description, type, amount, metadata, startDate, endDate, interval)
       setEditing(null)
     } catch { /* error shown by App */ }
   }
@@ -344,7 +344,7 @@ const MONETARY_TYPES = ['payment', 'subscription', 'bill']
 
 function TaskMeta({ task, currency = '$', numberFormat = 'en' }) {
   if (!MONETARY_TYPES.includes(task.type)) return null
-  const { amount } = task.metadata ?? {}
+  const amount = task.amount
   if (!amount) return null
   return (
     <div className="task-meta">

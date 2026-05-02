@@ -289,9 +289,9 @@ export default function App() {
     }
   }, [month, onApiError])
 
-  async function handleCreate(title, description, type, metadata, startDate, endDate, interval) {
+  async function handleCreate(title, description, type, amount, metadata, startDate, endDate, interval) {
     try {
-      const task = await createTask(title, description, type, metadata, startDate, endDate, interval)
+      const task = await createTask(title, description, type, amount, metadata, startDate, endDate, interval)
       setTasks(prev => [...prev, task])
       showToast('Task created')
     } catch (e) {
@@ -300,9 +300,9 @@ export default function App() {
     }
   }
 
-  async function handleUpdate(id, title, description, type, metadata, startDate, endDate, interval) {
+  async function handleUpdate(id, title, description, type, amount, metadata, startDate, endDate, interval) {
     try {
-      const task = await updateTask(id, title, description, type, metadata, startDate, endDate, interval)
+      const task = await updateTask(id, title, description, type, amount, metadata, startDate, endDate, interval)
       setTasks(prev => prev.map(t => (t.id === id ? task : t)))
       showToast('Task updated')
     } catch (e) {
@@ -335,6 +335,7 @@ export default function App() {
   async function handleUnarchive(id) {
     try {
       await unarchiveTask(id)
+      await loadData()
       showToast('Task restored')
     } catch (e) {
       onApiError(e)
@@ -361,12 +362,12 @@ export default function App() {
     const MONETARY_TYPES = ['payment', 'subscription', 'bill']
     const monetaryTasks = tasks.filter(t => MONETARY_TYPES.includes(t.type))
     const due = monetaryTasks.reduce((sum, t) =>
-      sum + (parseFloat(t.metadata?.amount ?? '') || 0), 0)
+      sum + (parseFloat(t.amount ?? '') || 0), 0)
     const paid = monetaryTasks
       .filter(t => { const c = completionMap.get(t.id); return c && !c.skipped })
       .reduce((sum, t) => {
         const c = completionMap.get(t.id)
-        return sum + (parseFloat(c?.amount || t.metadata?.amount || '') || 0)
+        return sum + (parseFloat(c?.amount || t.amount || '') || 0)
       }, 0)
     return {
       hasMonetary: monetaryTasks.length > 0,
