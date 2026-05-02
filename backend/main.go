@@ -155,12 +155,13 @@ func main() {
 	defer cancel()
 
 	// ── Router ────────────────────────────────────────────────────────────────
-	h  := &Handler{db: db, receiptsDir: receiptsDir}
+	safeClient := safeWebhookClient()
+	h  := &Handler{db: db, receiptsDir: receiptsDir, client: safeClient}
 	rl := newRateLimiter(ctx)
 	ah := &AuthHandler{db: db, secret: secret, secure: secureCookies, trustProxy: trustProxy, rl: rl}
 	uh := &UserHandler{db: db}
 	th := &TokenHandler{db: db}
-	wh := &WebhookHandler{db: db}
+	wh := &WebhookHandler{db: db, client: safeClient}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -242,7 +243,7 @@ func startMonthDigestScheduler(ctx context.Context, db *DB) {
 			}
 			month := next.Format("2006-01")
 			log.Printf("firing month.digest for %s", month)
-			FireMonthDigest(db, month)
+			FireMonthDigest(db, month, safeWebhookClient())
 		}
 	}()
 }

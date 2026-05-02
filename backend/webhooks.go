@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +20,85 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+// blockedCIDRs lists address ranges webhook delivery must never reach:
+// loopback, RFC 1918 private, link-local (covers cloud metadata endpoints
+// like 169.254.169.254), carrier-grade NAT, and IPv6 equivalents.
+var blockedCIDRs []*net.IPNet
+
+func init() {
+	for _, cidr := range []string{
+		"127.0.0.0/8",   // IPv4 loopback
+		"::1/128",       // IPv6 loopback
+		"10.0.0.0/8",   // RFC 1918
+		"172.16.0.0/12", // RFC 1918
+		"192.168.0.0/16", // RFC 1918
+		"169.254.0.0/16", // link-local / cloud metadata (AWS, GCP, Azure)
+		"fe80::/10",     // IPv6 link-local
+		"fc00::/7",      // IPv6 unique local
+		"100.64.0.0/10", // carrier-grade NAT (RFC 6598)
+		"0.0.0.0/8",    // "this" network
+		"::/128",        // IPv6 unspecified
+	} {
+		_, block, _ := net.ParseCIDR(cidr)
+		blockedCIDRs = append(blockedCIDRs, block)
+	}
+}
+
+func isPrivateIP(ip net.IP) bool {
+	for _, block := range blockedCIDRs {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// safeWebhookClient returns an http.Client that refuses connections to
+// private, loopback, and cloud-metadata IP ranges at the DNS-resolution
+// level, and re-validates each redirect destination the same way.
+func safeWebhookClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupHost(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ipStr := range ips {
+				ip := net.ParseIP(ipStr)
+				if ip == nil || isPrivateIP(ip) {
+					return nil, fmt.Errorf("webhook: refusing connection to private/internal address %s", ipStr)
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0], port))
+		},
+	}
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("webhook: too many redirects")
+			}
+			ips, err := net.DefaultResolver.LookupHost(req.Context(), req.URL.Hostname())
+			if err != nil {
+				return fmt.Errorf("webhook: redirect resolve failed: %w", err)
+			}
+			for _, ipStr := range ips {
+				ip := net.ParseIP(ipStr)
+				if ip == nil || isPrivateIP(ip) {
+					return fmt.Errorf("webhook: refusing redirect to private/internal address %s", ipStr)
+				}
+			}
+			return nil
+		},
+	}
+}
 
 // allowedWebhookEvents is the set of event names clients may subscribe to.
 var allowedWebhookEvents = map[string]bool{
@@ -29,7 +110,8 @@ var allowedWebhookEvents = map[string]bool{
 
 // WebhookHandler handles CRUD for webhooks.
 type WebhookHandler struct {
-	db *DB
+	db     *DB
+	client *http.Client
 }
 
 // webhookResponse is the API-safe view of a Webhook (omits secret).
@@ -187,8 +269,7 @@ func (h *WebhookHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("X-Montly-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := h.client.Do(req)
 	if err != nil {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -225,7 +306,7 @@ type digestPayload struct {
 
 // FireWebhooks sends the event to all matching webhooks for userID. Runs in a goroutine;
 // failures are logged but never bubble up to the caller.
-func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, month string) {
+func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, month string, client *http.Client) {
 	hooks, err := db.GetWebhooksForUser(userID)
 	if err != nil {
 		log.Printf("FireWebhooks: list hooks: %v", err)
@@ -240,8 +321,6 @@ func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, m
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	body, _ := json.Marshal(payload)
-
-	client := &http.Client{Timeout: 10 * time.Second}
 
 	for _, wh := range hooks {
 		if !strings.Contains(","+wh.Events+",", ","+event+",") {
@@ -275,14 +354,12 @@ func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, m
 
 // FireMonthDigest sends a month.digest webhook to every user subscribed to that
 // event. Called by the monthly scheduler; runs entirely in background goroutines.
-func FireMonthDigest(db *DB, month string) {
+func FireMonthDigest(db *DB, month string, client *http.Client) {
 	users, err := db.ListUsers()
 	if err != nil {
 		log.Printf("FireMonthDigest: list users: %v", err)
 		return
 	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
 
 	for _, u := range users {
 		hooks, err := db.GetWebhooksForUser(u.ID)

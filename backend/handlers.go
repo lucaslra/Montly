@@ -23,6 +23,7 @@ import (
 type Handler struct {
 	db          *DB
 	receiptsDir string
+	client      *http.Client
 }
 
 // receiptFilenameRe enforces that stored/served filenames are always UUID-based.
@@ -594,7 +595,7 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 		safeRemoveReceipt(h.receiptsDir, receiptFile)
 		writeJSON(w, map[string]bool{"completed": false})
-		go FireWebhooks(h.db, task.UserID, "task.uncompleted", task.ID, task.Title, req.Month)
+		go FireWebhooks(h.db, task.UserID, "task.uncompleted", task.ID, task.Title, req.Month, h.client)
 		go h.db.InsertAuditLog(actorID, "uncomplete", "completion", task.ID, task.Title)
 	} else if found && existing.Skipped {
 		// Was skipped → mark as completed.
@@ -603,7 +604,7 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
-		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month)
+		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month, h.client)
 		go h.db.InsertAuditLog(actorID, "complete", "completion", task.ID, task.Title)
 	} else {
 		// Pending → complete.
@@ -612,7 +613,7 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
-		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month)
+		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month, h.client)
 		go h.db.InsertAuditLog(actorID, "complete", "completion", task.ID, task.Title)
 	}
 }

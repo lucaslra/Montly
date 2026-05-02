@@ -39,11 +39,12 @@ func newTestServer(t *testing.T) *testServer {
 	t.Cleanup(cancel)
 	rl := newRateLimiter(ctx)
 
-	h := &Handler{db: db, receiptsDir: receiptsDir}
+	testClient := &http.Client{Timeout: 10 * time.Second}
+	h := &Handler{db: db, receiptsDir: receiptsDir, client: testClient}
 	ah := &AuthHandler{db: db, secret: secret, secure: false, trustProxy: false, rl: rl}
 	uh := &UserHandler{db: db}
 	th := &TokenHandler{db: db}
-	wh := &WebhookHandler{db: db}
+	wh := &WebhookHandler{db: db, client: testClient}
 
 	r := chi.NewRouter()
 	mountRoutes := func(r chi.Router) {
@@ -1774,7 +1775,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "")
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 
@@ -1808,7 +1809,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "")
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 		if ct := hit.headers.Get("Content-Type"); ct != "application/json" {
@@ -1826,7 +1827,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", secret)
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 
@@ -1853,7 +1854,7 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "") // no secret
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 		if sig := hit.headers.Get("X-Montly-Signature"); sig != "" {
@@ -1877,7 +1878,7 @@ func TestFireWebhooks_EventFilter(t *testing.T) {
 		db.CreateWebhook(user.ID, uncompletedCap.srv.URL, "task.uncompleted", "")
 
 		// Fire only the completed event.
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		completedCap.waitHit(t)          // must arrive
 		uncompletedCap.expectNoHit(t)    // must NOT arrive
@@ -1892,7 +1893,7 @@ func TestFireWebhooks_EventFilter(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed,task.uncompleted", "")
 
-		FireWebhooks(db, user.ID, "task.uncompleted", task.ID, task.Title, "2026-04")
+		FireWebhooks(db, user.ID, "task.uncompleted", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 		cap.waitHit(t) // must arrive for uncompleted too
 	})
 
@@ -1904,7 +1905,7 @@ func TestFireWebhooks_EventFilter(t *testing.T) {
 		cap := newWebhookCapture()
 		defer cap.close()
 		// No webhooks registered — cap should receive nothing.
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04")
+		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 		cap.expectNoHit(t)
 	})
 }
@@ -2625,7 +2626,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05")
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 		var payload digestPayload
@@ -2652,7 +2653,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "") // NOT month.digest
 
-		FireMonthDigest(db, "2026-05")
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
 		cap.expectNoHit(t)
 	})
 
@@ -2666,7 +2667,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05")
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 		var payload digestPayload
@@ -2687,7 +2688,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", secret)
 
-		FireMonthDigest(db, "2026-05")
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 		sig := hit.headers.Get("X-Montly-Signature")
