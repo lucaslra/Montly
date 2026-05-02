@@ -1,5 +1,6 @@
 # Montly
 
+[![Website](https://img.shields.io/badge/website-lucaslra.github.io%2FMontly-4f7ef8)](https://lucaslra.github.io/Montly/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
