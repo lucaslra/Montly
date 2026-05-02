@@ -200,3 +200,111 @@ describe('shared-by badge', () => {
     expect(screen.queryByText(/shared by/i)).not.toBeInTheDocument()
   })
 })
+
+// ── Skip buttons ──────────────────────────────────────────────────────────────
+
+describe('TaskList skip buttons', () => {
+  const task = { id: 1, title: 'Rent', type: 'payment', metadata: { amount: '500' }, interval: 1 }
+  const done = { task_id: 1, month: '2026-04', completed_at: 'now', receipt_file: '', amount: '', note: '', skipped: false }
+  const skipped = { task_id: 1, month: '2026-04', completed_at: '', receipt_file: '', amount: '', note: '', skipped: true }
+
+  it('renders skip button for an incomplete task', () => {
+    renderList([task])
+    expect(screen.getByLabelText('Skip "Rent" for this month')).toBeInTheDocument()
+  })
+
+  it('renders un-skip button for a skipped task', () => {
+    renderList([task], new Map([[1, skipped]]))
+    expect(screen.getByLabelText('Un-skip "Rent" for this month')).toBeInTheDocument()
+  })
+
+  it('does not render skip button for a completed task', () => {
+    renderList([task], new Map([[1, done]]))
+    expect(screen.queryByLabelText('Skip "Rent" for this month')).not.toBeInTheDocument()
+  })
+
+  it('calls onSkip with task id when skip button clicked', async () => {
+    const props = renderList([task])
+    await userEvent.click(screen.getByLabelText('Skip "Rent" for this month'))
+    expect(props.onSkip).toHaveBeenCalledWith(1)
+  })
+
+  it('calls onSkip with task id when un-skip button clicked', async () => {
+    const props = renderList([task], new Map([[1, skipped]]))
+    await userEvent.click(screen.getByLabelText('Un-skip "Rent" for this month'))
+    expect(props.onSkip).toHaveBeenCalledWith(1)
+  })
+})
+
+// ── NoteSlot ──────────────────────────────────────────────────────────────────
+
+describe('NoteSlot', () => {
+  const task = { id: 1, title: 'Rent', type: 'payment', metadata: { amount: '500' }, interval: 1 }
+  const done = { task_id: 1, month: '2026-04', completed_at: 'now', receipt_file: '', amount: '', note: '', skipped: false }
+
+  it('renders "+ add note" button when note is empty', () => {
+    renderList([task], new Map([[1, done]]))
+    expect(screen.getByRole('button', { name: '+ add note' })).toBeInTheDocument()
+  })
+
+  it('renders note text as button when note exists', () => {
+    const withNote = { ...done, note: 'Paid via bank transfer' }
+    renderList([task], new Map([[1, withNote]]))
+    expect(screen.getByRole('button', { name: 'Paid via bank transfer' })).toBeInTheDocument()
+  })
+
+  it('enters edit mode when note button clicked', async () => {
+    renderList([task], new Map([[1, done]]))
+    await userEvent.click(screen.getByRole('button', { name: '+ add note' }))
+    expect(screen.getByRole('textbox', { name: 'Completion note' })).toBeInTheDocument()
+  })
+
+  it('calls onUpdateCompletion with trimmed note on save button click', async () => {
+    const props = renderList([task], new Map([[1, done]]))
+    await userEvent.click(screen.getByRole('button', { name: '+ add note' }))
+    const textarea = screen.getByRole('textbox', { name: 'Completion note' })
+    await userEvent.type(textarea, '  paid online  ')
+    await userEvent.click(screen.getByTitle('Save (Ctrl+Enter)'))
+    expect(props.onUpdateCompletion).toHaveBeenCalledWith(1, { note: 'paid online' })
+  })
+
+  it('cancels edit on Escape key', async () => {
+    renderList([task], new Map([[1, done]]))
+    await userEvent.click(screen.getByRole('button', { name: '+ add note' }))
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Completion note' })).not.toBeInTheDocument()
+  })
+})
+
+// ── Receipt confirm-remove dialog ─────────────────────────────────────────────
+
+describe('TaskList receipt confirm-remove', () => {
+  const task = { id: 1, title: 'Rent', type: 'payment', metadata: { amount: '500' }, interval: 1 }
+  const withReceipt = { task_id: 1, month: '2026-04', completed_at: 'now', receipt_file: 'uuid.pdf', amount: '', note: '', skipped: false }
+
+  it('shows Remove receipt button when receipt exists', () => {
+    renderList([task], new Map([[1, withReceipt]]))
+    expect(screen.getByLabelText('Remove receipt')).toBeInTheDocument()
+  })
+
+  it('clicking Remove shows confirm dialog', async () => {
+    renderList([task], new Map([[1, withReceipt]]))
+    await userEvent.click(screen.getByLabelText('Remove receipt'))
+    expect(screen.getByText('Remove receipt?')).toBeInTheDocument()
+  })
+
+  it('confirming Remove calls onRemoveReceipt', async () => {
+    const props = renderList([task], new Map([[1, withReceipt]]))
+    await userEvent.click(screen.getByLabelText('Remove receipt'))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(props.onRemoveReceipt).toHaveBeenCalledWith(1)
+  })
+
+  it('cancelling dismisses the dialog without calling onRemoveReceipt', async () => {
+    const props = renderList([task], new Map([[1, withReceipt]]))
+    await userEvent.click(screen.getByLabelText('Remove receipt'))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText('Remove receipt?')).not.toBeInTheDocument()
+    expect(props.onRemoveReceipt).not.toHaveBeenCalled()
+  })
+})
