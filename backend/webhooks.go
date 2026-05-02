@@ -150,6 +150,7 @@ func (h *WebhookHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebhookHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10) // 4 KB
 	var req struct {
 		URL    string   `json:"url"`
 		Events []string `json:"events"`

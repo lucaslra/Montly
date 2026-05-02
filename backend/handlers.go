@@ -328,6 +328,7 @@ type taskBody struct {
 // parseTaskBody decodes and validates the JSON body for task create/update requests.
 // On failure it writes the appropriate error response and returns false.
 func parseTaskBody(w http.ResponseWriter, r *http.Request) (taskBody, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10) // 16 KB
 	var raw struct {
 		Title       string          `json:"title"`
 		Description string          `json:"description"`

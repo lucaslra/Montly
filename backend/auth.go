@@ -307,6 +307,10 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}
+	if len(req.Password) > 72 {
+		writeError(w, "password must be 72 characters or fewer", http.StatusBadRequest)
+		return
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
@@ -375,6 +379,10 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "new password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}
+	if len(req.NewPassword) > 72 {
+		writeError(w, "new password must be 72 characters or fewer", http.StatusBadRequest)
+		return
+	}
 
 	user, err := h.db.GetUserByID(currentUser(r).UserID)
 	if err != nil {
@@ -419,6 +427,7 @@ func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10) // 4 KB
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -438,6 +447,10 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Password) < 8 {
 		writeError(w, "password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	if len(req.Password) > 72 {
+		writeError(w, "password must be 72 characters or fewer", http.StatusBadRequest)
 		return
 	}
 
