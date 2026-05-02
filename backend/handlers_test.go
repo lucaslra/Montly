@@ -2488,3 +2488,154 @@ func TestServeReceipt(t *testing.T) {
 		}
 	})
 }
+
+// ── TestWebhook handler ───────────────────────────────────────────────────────
+
+func TestWebhookTest(t *testing.T) {
+	t.Run("delivers test payload to own webhook", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		cap := newWebhookCapture()
+		defer cap.close()
+		hook, err := ts.db.CreateWebhook(alice.ID, cap.srv.URL, "task.completed", "")
+		if err != nil {
+			t.Fatalf("CreateWebhook: %v", err)
+		}
+
+		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/webhooks/%d/test", hook.ID), "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+		var resp map[string]any
+		decodeJSON(t, w, &resp)
+		if resp["ok"] != true {
+			t.Errorf("expected ok=true, got %v", resp["ok"])
+		}
+
+		cap.waitHit(t) // verify delivery was made
+	})
+
+	t.Run("returns 404 for another user's webhook", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		bob := ts.mustUser(t, "bob", false)
+		cap := newWebhookCapture()
+		defer cap.close()
+		hook, _ := ts.db.CreateWebhook(alice.ID, cap.srv.URL, "task.completed", "")
+
+		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/webhooks/%d/test", hook.ID), "", bob.ID, false))
+		assertStatus(t, w, http.StatusNotFound)
+		cap.expectNoHit(t)
+	})
+
+	t.Run("month.digest webhook sends digest payload", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		cap := newWebhookCapture()
+		defer cap.close()
+		hook, _ := ts.db.CreateWebhook(alice.ID, cap.srv.URL, "month.digest", "")
+
+		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/webhooks/%d/test", hook.ID), "", alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+
+		hit := cap.waitHit(t)
+		var payload map[string]any
+		if err := json.Unmarshal(hit.body, &payload); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if payload["event"] != "month.digest" {
+			t.Errorf("expected event=month.digest, got %v", payload["event"])
+		}
+		if _, ok := payload["task_count"]; !ok {
+			t.Error("expected task_count field in digest payload")
+		}
+	})
+}
+
+// ── FireMonthDigest ───────────────────────────────────────────────────────────
+
+func TestFireMonthDigest(t *testing.T) {
+	t.Run("sends digest to user subscribed to month.digest", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		db.CreateTask("Netflix", "", "subscription", "2026-01", "", "15", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+
+		FireMonthDigest(db, "2026-05")
+
+		hit := cap.waitHit(t)
+		var payload digestPayload
+		if err := json.Unmarshal(hit.body, &payload); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if payload.Event != "month.digest" {
+			t.Errorf("event: got %q, want month.digest", payload.Event)
+		}
+		if payload.TaskCount != 1 {
+			t.Errorf("task_count: got %d, want 1", payload.TaskCount)
+		}
+		if payload.TotalAmount != "15.00" {
+			t.Errorf("total_amount: got %q, want 15.00", payload.TotalAmount)
+		}
+	})
+
+	t.Run("user without month.digest hook receives nothing", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		db.CreateTask("Netflix", "", "subscription", "2026-01", "", "15", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "") // NOT month.digest
+
+		FireMonthDigest(db, "2026-05")
+		cap.expectNoHit(t)
+	})
+
+	t.Run("non-numeric amount is excluded from total", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		db.CreateTask("Task A", "", "bill", "2026-01", "", "10", nil, user.ID, 1)
+		db.CreateTask("Task B", "", "reminder", "2026-01", "", "", nil, user.ID, 1)
+
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+
+		FireMonthDigest(db, "2026-05")
+
+		hit := cap.waitHit(t)
+		var payload digestPayload
+		json.Unmarshal(hit.body, &payload)
+		if payload.TotalAmount != "10.00" {
+			t.Errorf("total_amount: got %q, want 10.00", payload.TotalAmount)
+		}
+		if payload.TaskCount != 2 {
+			t.Errorf("task_count: got %d, want 2", payload.TaskCount)
+		}
+	})
+
+	t.Run("HMAC signature included when secret is set", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		secret := "digest-secret-xyz"
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", secret)
+
+		FireMonthDigest(db, "2026-05")
+
+		hit := cap.waitHit(t)
+		sig := hit.headers.Get("X-Montly-Signature")
+		if sig == "" {
+			t.Fatal("expected X-Montly-Signature header")
+		}
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(hit.body)
+		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		if sig != expected {
+			t.Errorf("signature mismatch: got %q, want %q", sig, expected)
+		}
+	})
+}
