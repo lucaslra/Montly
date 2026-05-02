@@ -808,6 +808,47 @@ func TestUpdateSettings(t *testing.T) {
 			`{"currency":"TOOLONGCURRENCY"}`, alice.ID, false))
 		assertStatus(t, w, http.StatusBadRequest)
 	})
+
+	t.Run("valid settings with all fields returns 200", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPut, "/api/settings",
+			`{"currency":"$","date_format":"long","color_mode":"system","task_sort":"type","completed_last":"false","fiscal_year_start":"1","number_format":"en"}`,
+			alice.ID, false))
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("400 on invalid task_sort", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPut, "/api/settings",
+			`{"task_sort":"random"}`, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 on invalid completed_last", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPut, "/api/settings",
+			`{"completed_last":"yes"}`, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 when fiscal_year_start is out of range", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPut, "/api/settings",
+			`{"fiscal_year_start":"13"}`, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("400 on invalid number_format", func(t *testing.T) {
+		ts := newTestServer(t)
+		alice := ts.mustUser(t, "alice", false)
+		w := ts.do(ts.authReq(t, http.MethodPut, "/api/settings",
+			`{"number_format":"us"}`, alice.ID, false))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
 }
 
 // ── ExportCSV ─────────────────────────────────────────────────────────────────
