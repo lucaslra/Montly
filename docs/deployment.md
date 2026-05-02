@@ -23,7 +23,7 @@ Open `http://localhost:8080` — on first access you'll be prompted to create th
 | `PORT`             | `8080`       | TCP port to listen on |
 | `DATA_DIR`         | `./data`     | Directory for SQLite file and receipt uploads |
 | `ADMIN_USERNAME`   | *(optional)*  | Username for the initial admin account; omit to use the first-run UI setup instead |
-| `ADMIN_PASSWORD`   | *(optional)*  | Password for the initial admin account — must be ≥ 8 characters |
+| `ADMIN_PASSWORD`   | *(optional)*  | Password for the initial admin account — must be 8–72 characters |
 | `SESSION_SECRET`   | *(random)*   | HMAC key for session cookies. Set a stable value so sessions survive restarts |
 | `SECURE_COOKIES`   | `false`      | Set `true` when serving over HTTPS — adds `Secure` flag to cookies, HSTS header, and `upgrade-insecure-requests` to the CSP |
 | `DB_TYPE`          | `sqlite`     | `sqlite` or `postgres` |
@@ -202,7 +202,7 @@ git pull
 docker compose up -d --build
 ```
 
-All schema migrations are applied automatically on startup and are idempotent — safe to run multiple times.
+All schema migrations are applied automatically on startup and are idempotent — safe to run multiple times. Each migration step is logged individually; if the schema is already current you will see "migration: schema up to date, no migrations needed" in the startup log.
 
 ---
 
@@ -213,5 +213,5 @@ All schema migrations are applied automatically on startup and are idempotent �
 - [ ] Use HTTPS (Caddy or nginx + certbot)
 - [ ] Bind the container to `127.0.0.1:8080`, not `0.0.0.0:8080`
 - [ ] Pass real client IP via `X-Forwarded-For` and set `TRUST_PROXY_HEADERS=true` so the login rate limiter works correctly
-- [ ] Rotate admin password after first login
+- [ ] Rotate admin password after first login (must be 8–72 characters)
 - [ ] Keep the `DATA_DIR` volume backed up regularly

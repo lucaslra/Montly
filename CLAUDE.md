@@ -18,6 +18,7 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 ## Key conventions
 - All SQLite queries and migrations live in `backend/db.go`; migrations use idempotent ALTER TABLE; includes `task_shares` join table for per-task collaborators
 - All HTTP handlers in `backend/handlers.go` (tasks, completions, settings, receipts, CSV export); auth + token + setup + user handlers live in `backend/auth.go`; webhook handlers in `backend/webhooks.go`
+- Webhook delivery uses `safeWebhookClient()` which resolves DNS and rejects private/loopback/link-local IPs (covers cloud metadata endpoints like 169.254.169.254) before connecting; redirects are re-validated at each hop and capped at 3
 - Task access uses two helpers: `taskOwnerCheck` (owner-only actions like edit/archive/share management) and `taskAccessCheck` (owner OR shared user — used for completions, receipt upload/delete, skip)
 - Frontend API calls are centralized in `frontend/src/api.js`
 - Shared frontend utilities (e.g. `formatAmount`) live in `frontend/src/utils.js`
@@ -27,7 +28,7 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 - A mobile app will be added in the future — keep API design flexible
 
 ## First-run setup
-On a fresh install with no users in the DB, the app serves a registration form (`SetupView.jsx`) instead of the login screen. The admin account is created via `POST /api/auth/setup`. `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars are still supported for automated/headless deployments but are no longer required.
+On a fresh install with no users in the DB, the app serves a registration form (`SetupView.jsx`) instead of the login screen. The admin account is created via `POST /api/auth/setup`. `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars are still supported for automated/headless deployments but are no longer required. Passwords must be 8–72 characters (bcrypt truncates silently at 72).
 
 ## Key API endpoints
 - `GET  /api/auth/setup` — `{"needs_setup": bool}`, public, no auth required
@@ -69,11 +70,12 @@ On a fresh install with no users in the DB, the app serves a registration form (
   - `ReportView.test.jsx` — chart rendering, stat cards, loading and empty states
   - `api.test.js` — HTTP layer: status codes, error handling, request shape; covers all API functions including archive, shares, lookup, import
   - `utils.test.js` — `formatAmount` en/eu number formats
-- **E2E:** `make e2e` — Playwright 1.52 against the full Docker stack; 72 tests across 4 suites:
+- **E2E:** `make e2e` — Playwright 1.52 against the full Docker stack; 86 tests across 5 suites:
   - `01-auth.spec.ts` — setup flow, login/logout, protected routes, token auth
   - `02-tasks.spec.ts` — create, edit, delete, search, CSV import
   - `03-completions.spec.ts` — toggle, amount editing, receipt attach/remove, notes, skip, cross-month isolation
   - `04-settings.spec.ts` — preferences, password change, API tokens, webhooks, user management, audit log
+  - `05-sharing.spec.ts` — shared task lists, collaborator add/remove, archive flows
   - `e2e/global-setup.ts` runs once to create the admin account and persist the session; `e2e/fixtures/` holds runtime-generated test files (gitignored)
 
 ## Available agents
