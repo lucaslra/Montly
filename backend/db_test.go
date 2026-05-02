@@ -1289,7 +1289,7 @@ func TestGetReportData(t *testing.T) {
 	t.Run("task active in its start month appears correctly", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		_, err := db.CreateTask("Rent", "", "bill", "2026-03", "", nil, user.ID, 1)
+		_, err := db.CreateTask("Rent", "", "bill", "2026-03", "", "", nil, user.ID, 1)
 		if err != nil {
 			t.Fatalf("CreateTask: %v", err)
 		}
@@ -1311,7 +1311,7 @@ func TestGetReportData(t *testing.T) {
 	t.Run("interval=2 task appears every other month", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		_, err := db.CreateTask("Bimonthly", "", "", "2026-01", "", nil, user.ID, 2)
+		_, err := db.CreateTask("Bimonthly", "", "", "2026-01", "", "", nil, user.ID, 2)
 		if err != nil {
 			t.Fatalf("CreateTask: %v", err)
 		}
@@ -1344,7 +1344,7 @@ func TestGetReportData(t *testing.T) {
 	t.Run("task with end_date excluded after its end", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		_, err := db.CreateTask("Short task", "", "", "2026-01", "2026-02", nil, user.ID, 1)
+		_, err := db.CreateTask("Short task", "", "", "2026-01", "2026-02", "", nil, user.ID, 1)
 		if err != nil {
 			t.Fatalf("CreateTask: %v", err)
 		}
@@ -1366,7 +1366,7 @@ func TestGetReportData(t *testing.T) {
 	t.Run("history month includes completions, forecast month has empty completions", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Pay rent", "", "payment", "2026-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Pay rent", "", "payment", "2026-01", "", "", nil, user.ID, 1)
 		_, err := db.AddCompletion(task.ID, "2026-03")
 		if err != nil {
 			t.Fatalf("AddCompletion: %v", err)
@@ -1404,7 +1404,7 @@ func TestGetReportData(t *testing.T) {
 		db := setupTestDB(t)
 		alice, _ := db.CreateUser("alice", testHash(t), false)
 		bob, _ := db.CreateUser("bob", testHash(t), false)
-		task, _ := db.CreateTask("Alice task", "", "", "2026-01", "", nil, alice.ID, 1)
+		task, _ := db.CreateTask("Alice task", "", "", "2026-01", "", "", nil, alice.ID, 1)
 		if err := db.AddShare(task.ID, bob.ID); err != nil {
 			t.Fatalf("AddShare: %v", err)
 		}
@@ -1423,7 +1423,7 @@ func TestGetReportData(t *testing.T) {
 	t.Run("forecast months exclude archived tasks", func(t *testing.T) {
 		db := setupTestDB(t)
 		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Will be archived", "", "", "2026-01", "", nil, user.ID, 1)
+		task, _ := db.CreateTask("Will be archived", "", "", "2026-01", "", "", nil, user.ID, 1)
 		if err := db.ArchiveTask(task.ID); err != nil {
 			t.Fatalf("ArchiveTask: %v", err)
 		}
