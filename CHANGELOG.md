@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased] — v0.17.0
+## [0.17.0] — 2026-05-02
 
 ### Security
 - **Request body size limits** — `parseTaskBody`, `CreateWebhook`, and `CreateUser` now cap request bodies before decoding (16 KB / 4 KB respectively), preventing memory exhaustion via oversized payloads
