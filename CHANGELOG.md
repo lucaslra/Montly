@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.19.0] — 2026-05-29
+
+### Added
+- **MCP server** — standalone MCP server (`mcp-server/`) exposes Montly tasks as tools for AI assistants (Claude Desktop, Cursor, etc.); runs as a separate Docker container with its own Dockerfile and test suite.
+- **Skip-to-content link** — keyboard and screen-reader users can now bypass the header navigation (WCAG 2.4.1).
+
+### Security
+- **Session validation on deleted users** — session cookies now verify the user still exists in the database on every request; deleted users are immediately locked out instead of retaining access until cookie expiry.
+
 ## [0.18.0] — 2026-05-02
 
 ### Added
