@@ -168,6 +168,13 @@ func requireAuth(secret []byte, db *DB, secure bool) func(http.Handler) http.Han
 				writeError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			user, err := db.GetUserByID(claims.UserID)
+			if err != nil {
+				clearSession(w, secure)
+				writeError(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			claims.IsAdmin = user.IsAdmin
 			ctx := context.WithValue(r.Context(), ctxUserKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

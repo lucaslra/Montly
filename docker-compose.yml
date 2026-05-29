@@ -13,5 +13,19 @@ services:
       PORT: "8080"
     restart: unless-stopped
 
+  # Optional: MCP server for AI assistant integration.
+  # Uncomment and set MONTLY_TOKEN to enable.
+  # mcp:
+  #   build: ./mcp-server
+  #   ports:
+  #     - "127.0.0.1:8081:8081"
+  #   environment:
+  #     MONTLY_URL: "http://montly:8080"
+  #     MONTLY_TOKEN: "mt_your_token_here"
+  #     MCP_PORT: "8081"
+  #   depends_on:
+  #     - montly
+  #   restart: unless-stopped
+
 volumes:
   montly_data:

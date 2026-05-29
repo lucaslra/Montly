@@ -60,6 +60,31 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* ── Skip nav ────────────────────────────────────── */
+.skip-nav {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: 1000;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.skip-nav:focus {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: auto;
+  height: auto;
+}
+
 /* ── Layout ──────────────────────────────────────── */
 .app {
   max-width: 540px;

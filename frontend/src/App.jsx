@@ -403,6 +403,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <a href="#main-content" className="skip-nav">Skip to content</a>
       <header className="app-header">
         <div className="header-top">
           <button className="app-title-btn" onClick={() => setView('monthly')}>Montly</button>
@@ -512,7 +513,7 @@ export default function App() {
         )}
       </header>
 
-      <main className="app-main">
+      <main id="main-content" className="app-main">
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>

@@ -17,6 +17,9 @@ frontend/dist
 backend/montly
 backend/monties
 
+# MCP server binary (built inside Docker)
+mcp-server/montly-mcp
+
 # Test data
 backend/*.db
 data/

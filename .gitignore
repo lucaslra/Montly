@@ -1,5 +1,6 @@
 # Go build output
 backend/montly
+mcp-server/montly-mcp
 
 # Embedded frontend (built artifact — placeholder kept for local dev)
 backend/dist/*
