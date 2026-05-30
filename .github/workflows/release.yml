@@ -12,8 +12,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  release:
-    name: Build & publish
+  montly:
+    name: Build & publish montly
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -49,6 +49,57 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  mcp:
+    name: Build & publish montly-mcp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/montly-mcp
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./mcp-server
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: Create release
+    runs-on: ubuntu-latest
+    needs: [montly, mcp]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract version
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/montly
+          tags: type=semver,pattern={{version}}
+
       - name: Extract changelog
         id: changelog
         run: |
@@ -67,6 +118,7 @@ jobs:
 
             ```
             docker pull ghcr.io/${{ github.repository_owner }}/montly:${{ steps.meta.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/montly-mcp:${{ steps.meta.outputs.version }}
             ```
 
             ${{ steps.changelog.outputs.body }}

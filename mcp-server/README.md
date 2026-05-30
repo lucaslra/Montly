@@ -26,7 +26,7 @@ services:
       - "127.0.0.1:8080:8080"
 
   mcp:
-    build: ./mcp-server
+    image: ghcr.io/lucaslra/montly-mcp:latest
     ports:
       - "127.0.0.1:8081:8081"
     environment:

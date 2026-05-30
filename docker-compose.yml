@@ -16,7 +16,7 @@ services:
   # Optional: MCP server for AI assistant integration.
   # Uncomment and set MONTLY_TOKEN to enable.
   # mcp:
-  #   build: ./mcp-server
+  #   image: ghcr.io/lucaslra/montly-mcp:latest
   #   ports:
   #     - "127.0.0.1:8081:8081"
   #   environment:
