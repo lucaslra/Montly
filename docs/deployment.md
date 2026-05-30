@@ -39,7 +39,7 @@ Create `docker-compose.prod.yml`:
 ```yaml
 services:
   montly:
-    image: montly:latest   # or build: .
+    image: ghcr.io/lucaslra/montly:latest
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -192,6 +192,40 @@ Authorization: Bearer mt_<your-token>
 ```
 
 All API endpoints are available under both `/api` and `/api/v1`. The `X-API-Version: 1` response header identifies the current version.
+
+---
+
+## MCP server (optional)
+
+The MCP server lets AI assistants (Claude Desktop, Cursor, etc.) interact with your Montly instance. It runs as a separate container alongside the main app.
+
+### Environment variables
+
+| Variable       | Default                 | Description |
+|----------------|-------------------------|-------------|
+| `MONTLY_URL`   | `http://localhost:8080` | Base URL of the Montly instance |
+| `MONTLY_TOKEN` | *(required)*            | API token (`mt_…`) from Settings → API Tokens |
+| `MCP_PORT`     | *(unset — stdio)*       | Set to serve MCP over HTTP instead of stdio |
+
+### Adding to your compose file
+
+```yaml
+  mcp:
+    image: ghcr.io/lucaslra/montly-mcp:latest
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      MONTLY_URL: "http://montly:8080"
+      MONTLY_TOKEN: "mt_your_token_here"
+      MCP_PORT: "8081"
+    depends_on:
+      - montly
+    restart: unless-stopped
+```
+
+> **Security:** The MCP HTTP transport has no authentication beyond the baked-in API token. Always bind to `127.0.0.1` or place it behind an authenticated reverse proxy. Do **not** expose the MCP port to the public internet.
+
+For local/stdio usage with Claude Desktop, see [`mcp-server/README.md`](../mcp-server/README.md).
 
 ---
 

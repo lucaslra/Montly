@@ -26,6 +26,9 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 - `PUT /api/tasks/:id` backfills completion amounts: when a task's `metadata.amount` changes, past completions with no per-entry override have the old amount stamped onto them, preserving historical accuracy (`UpdateTaskWithAmountBackfill` in `db.go`)
 - Webhooks fire against the **task owner's** subscriptions, not the acting user's — matters when a shared user toggles a task
 - A mobile app will be added in the future — keep API design flexible
+- MCP server lives in `mcp-server/` — a separate Go module with its own `Dockerfile`; it wraps the Montly REST API as MCP tools for AI assistants (Claude Desktop, Cursor, etc.)
+- MCP server code is split into `client.go` (HTTP client + API types), `tools.go` (tool handlers + enrichment), `main.go` (server + transport wiring)
+- MCP server runs as a separate Docker container (`ghcr.io/lucaslra/montly-mcp`); uses `MONTLY_URL` + `MONTLY_TOKEN` to talk to the main app, serves MCP over stdio (default) or Streamable HTTP when `MCP_PORT` is set
 
 ## First-run setup
 On a fresh install with no users in the DB, the app serves a registration form (`SetupView.jsx`) instead of the login screen. The admin account is created via `POST /api/auth/setup`. `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars are still supported for automated/headless deployments but are no longer required. Passwords must be 8–72 characters (bcrypt truncates silently at 72).
@@ -70,6 +73,10 @@ On a fresh install with no users in the DB, the app serves a registration form (
   - `ReportView.test.jsx` — chart rendering, stat cards, loading and empty states
   - `api.test.js` — HTTP layer: status codes, error handling, request shape; covers all API functions including archive, shares, lookup, import
   - `utils.test.js` — `formatAmount` en/eu number formats
+- **MCP server:** `cd mcp-server && go test ./...` — 20 tests covering the HTTP client, tool handler enrichment logic, and server wiring
+  - `client_test.go` — auth header, URL construction, error handling, constructor defaults
+  - `tools_test.go` — all-pending, mixed statuses, paid amount override, receipt detection, shared tasks, notes, empty list, month defaulting, API error propagation
+  - `main_test.go` — server creation
 - **E2E:** `make e2e` — Playwright 1.52 against the full Docker stack; 86 tests across 5 suites:
   - `01-auth.spec.ts` — setup flow, login/logout, protected routes, token auth
   - `02-tasks.spec.ts` — create, edit, delete, search, CSV import

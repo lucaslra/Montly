@@ -21,7 +21,7 @@ The MCP server runs as its own service alongside Montly. Uncomment the `mcp` ser
 ```yaml
 services:
   montly:
-    build: .
+    image: ghcr.io/lucaslra/montly:latest
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -79,6 +79,7 @@ List recurring tasks for a given month with completion status.
 ```bash
 cd mcp-server
 go build -o montly-mcp .
+go test ./...
 
 # stdio mode (local)
 MONTLY_TOKEN=mt_xxx ./montly-mcp

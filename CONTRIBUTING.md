@@ -9,8 +9,8 @@ For anything beyond a small bug fix, open an issue first to discuss the change. 
 ## Setup
 
 ```bash
-git clone https://github.com/lucaslra/Montly.git
-cd montly
+git clone https://git.nlga.me/lucaslra/Montly.git
+cd Montly
 make setup          # go mod tidy + npm install (backend, frontend, and e2e)
 make dev-backend    # terminal 1 — Go API on :8080
 make dev-frontend   # terminal 2 — Vite dev server on :5173
@@ -52,10 +52,11 @@ All tests must pass before a PR can be merged.
 
 ## Submitting a PR
 
-1. Fork → feature branch → PR against `main`.
+1. Fork → feature branch → PR against `main` on Gitea.
 2. Describe *what* changed and *why*.
 3. If it touches the UI, include a screenshot or brief description of what you tested.
-4. Keep PRs focused — one logical change per PR.
+4. If it touches the MCP server, run `cd mcp-server && go test ./...`.
+5. Keep PRs focused — one logical change per PR.
 
 ## License
 

@@ -15,5 +15,6 @@
 - [ ] Tests added or updated
 - [ ] `CHANGELOG.md` updated
 - [ ] Docs updated (if applicable)
-- [ ] `go test ./...` passes
-- [ ] `npm test` passes
+- [ ] `cd backend && go test ./...` passes
+- [ ] `cd frontend && npm test` passes
+- [ ] `cd mcp-server && go test ./...` passes (if MCP server was changed)

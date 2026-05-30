@@ -19,7 +19,7 @@ What you expected to happen.
 What actually happened.
 
 **Environment**
-- Montly version: (e.g. v0.17.0)
+- Montly version: (e.g. v0.19.0)
 - Browser: (e.g. Chrome 124)
 - Deployment: (Docker / local dev)
 - Database: (SQLite / PostgreSQL)
