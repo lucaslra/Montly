@@ -4,7 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.19.0] — 2026-05-29
+## [0.20.0] — 2026-05-30
+
+### Fixed
+- **Webhook `task.skipped` event** — subscribers now receive real deliveries when a task is skipped (was subscribed but never fired).
+- **`AddTaskShare` Content-Type** — response now correctly sets `Content-Type: application/json` (was sniffed as `text/plain` due to `WriteHeader` ordering).
+- **Amount validation** — `NaN`, `Infinity`, and negative values are now rejected in both task creation and completion patching; previously they passed validation and could corrupt spending totals.
+- **Skip error matching** — replaced fragile string comparison with a sentinel `ErrAlreadyCompleted` error.
+- **Progress bar with skipped tasks** — skipped tasks are now excluded from the denominator so 100% is reachable; the monetary summary also excludes skipped payments from the "due" total.
+- **Task checkbox tap target** — expanded from 20×20px to 44×44px minimum, meeting mobile touch target guidelines.
+
+### Changed
+- **Static asset caching** — Vite-built assets under `/assets/` now return `Cache-Control: public, max-age=31536000, immutable`, eliminating redundant downloads on repeat visits.
+- **Documentation** — 16 fixes across README, CLAUDE.md, SECURITY.md, deployment guide, CONTRIBUTING, MCP server README, PR template, and issue templates.
+
+## [0.19.0] — 2026-05-30
 
 ### Added
 - **MCP server** — standalone MCP server (`mcp-server/`) exposes Montly tasks as tools for AI assistants (Claude Desktop, Cursor, etc.); runs as a separate Docker container with its own Dockerfile and test suite.
