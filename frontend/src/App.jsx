@@ -353,27 +353,29 @@ export default function App() {
   }
 
   const { done, total, pct } = useMemo(() => {
+    const skippedCount = tasks.filter(t => completionMap.get(t.id)?.skipped).length
     const d = tasks.filter(t => { const c = completionMap.get(t.id); return c && !c.skipped }).length
-    const t = tasks.length
+    const t = tasks.length - skippedCount
     return { done: d, total: t, pct: t ? (d / t) * 100 : 0 }
   }, [tasks, completionMap])
 
   const { hasMonetary, dueAmount, paidAmount, isSettled } = useMemo(() => {
     const MONETARY_TYPES = ['payment', 'subscription', 'bill']
     const monetaryTasks = tasks.filter(t => MONETARY_TYPES.includes(t.type))
-    const due = monetaryTasks.reduce((sum, t) =>
+    const activeMonetary = monetaryTasks.filter(t => !completionMap.get(t.id)?.skipped)
+    const due = activeMonetary.reduce((sum, t) =>
       sum + (parseFloat(t.amount ?? '') || 0), 0)
-    const paid = monetaryTasks
+    const paid = activeMonetary
       .filter(t => { const c = completionMap.get(t.id); return c && !c.skipped })
       .reduce((sum, t) => {
         const c = completionMap.get(t.id)
         return sum + (parseFloat(c?.amount || t.amount || '') || 0)
       }, 0)
     return {
-      hasMonetary: monetaryTasks.length > 0,
+      hasMonetary: activeMonetary.length > 0,
       dueAmount: due,
       paidAmount: paid,
-      isSettled: monetaryTasks.length > 0 && due > 0 && paid >= due,
+      isSettled: activeMonetary.length > 0 && due > 0 && paid >= due,
     }
   }, [tasks, completionMap])
 

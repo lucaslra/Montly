@@ -288,6 +288,10 @@ func spaHandler(fsys fs.FS) http.Handler {
 		} else {
 			f.Close()
 		}
+		// Vite produces content-hashed filenames under /assets/ — safe to cache forever.
+		if strings.HasPrefix(clean, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 }

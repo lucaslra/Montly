@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -383,8 +384,9 @@ func parseTaskBody(w http.ResponseWriter, r *http.Request) (taskBody, bool) {
 		return taskBody{}, false
 	}
 	if raw.Amount != "" {
-		if _, err := strconv.ParseFloat(raw.Amount, 64); err != nil {
-			writeError(w, "amount must be a number", http.StatusBadRequest)
+		v, err := strconv.ParseFloat(raw.Amount, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			writeError(w, "amount must be a non-negative number", http.StatusBadRequest)
 			return taskBody{}, false
 		}
 	}
@@ -664,7 +666,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 
 	if req.Amount != nil {
 		if *req.Amount != "" {
-			if v, parseErr := strconv.ParseFloat(*req.Amount, 64); parseErr != nil || v < 0 {
+			if v, parseErr := strconv.ParseFloat(*req.Amount, 64); parseErr != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 				writeError(w, "amount must be a non-negative number", http.StatusBadRequest)
 				return
 			}
@@ -849,7 +851,7 @@ func (h *Handler) SkipCompletion(w http.ResponseWriter, r *http.Request) {
 	actorID := currentUser(r).UserID
 	completion, nowSkipped, err := h.db.SkipCompletion(req.TaskID, req.Month)
 	if err != nil {
-		if err.Error() == "task is already completed" {
+		if errors.Is(err, ErrAlreadyCompleted) {
 			writeError(w, "task is already completed, unmark it first", http.StatusBadRequest)
 			return
 		}
@@ -858,6 +860,7 @@ func (h *Handler) SkipCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 	if nowSkipped {
 		writeJSON(w, map[string]any{"skipped": true, "completion": completion})
+		go FireWebhooks(h.db, task.UserID, "task.skipped", task.ID, task.Title, req.Month, h.client)
 		go h.db.InsertAuditLog(actorID, "skip", "completion", task.ID, task.Title)
 	} else {
 		writeJSON(w, map[string]any{"skipped": false})
@@ -1121,8 +1124,7 @@ func (h *Handler) AddTaskShare(w http.ResponseWriter, r *http.Request) {
 	if shares == nil {
 		shares = []SharedUser{}
 	}
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, shares)
+	writeJSONCreated(w, shares)
 }
 
 func (h *Handler) RemoveTaskShare(w http.ResponseWriter, r *http.Request) {

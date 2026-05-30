@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -12,6 +13,9 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
+
+// ErrAlreadyCompleted is returned when trying to skip a task that is already completed.
+var ErrAlreadyCompleted = errors.New("task is already completed")
 
 type DB struct {
 	*sql.DB
@@ -1107,7 +1111,7 @@ func (db *DB) SkipCompletion(taskID int64, month string) (Completion, bool, erro
 		return Completion{}, false, err
 	}
 	if found && !existing.Skipped {
-		return Completion{}, false, fmt.Errorf("task is already completed")
+		return Completion{}, false, ErrAlreadyCompleted
 	}
 	if found && existing.Skipped {
 		if _, err := db.Exec(db.q(`DELETE FROM completions WHERE task_id = ? AND month = ?`), taskID, month); err != nil {
