@@ -311,6 +311,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   transition: border-color 0.15s;
+  cursor: pointer;
 }
 /* fix 1: hover affordance — only on pointer devices to avoid iOS tap flash */
 @media (hover: hover) {

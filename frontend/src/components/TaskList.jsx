@@ -28,12 +28,21 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
           <li
             key={task.id}
             className={`task-item${done ? ' completed' : ''}${isSkipped ? ' skipped' : ''}`}
+            onClick={() => {
+              if (showConfirm) return
+              if (done && completion?.receipt_file) {
+                setConfirmUndo(task.id)
+              } else {
+                onToggle(task.id)
+              }
+            }}
           >
             <button
               className="task-toggle-btn"
               aria-pressed={done}
               aria-label={done ? `Unmark "${task.title}"` : `Mark "${task.title}" as done`}
-              onClick={() => {
+              onClick={e => {
+                e.stopPropagation()
                 if (showConfirm) { setConfirmUndo(null); return }
                 if (done && completion?.receipt_file) {
                   setConfirmUndo(task.id)
@@ -58,7 +67,7 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
                 {isSkipped ? (
                   <button
                     className="task-skip-btn task-skip-btn--active"
-                    onClick={() => onSkip(task.id)}
+                    onClick={e => { e.stopPropagation(); onSkip(task.id) }}
                     aria-label={`Un-skip "${task.title}" for this month`}
                   >
                     un-skip
@@ -66,7 +75,7 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
                 ) : !done ? (
                   <button
                     className="task-skip-btn"
-                    onClick={() => onSkip(task.id)}
+                    onClick={e => { e.stopPropagation(); onSkip(task.id) }}
                     aria-label={`Skip "${task.title}" for this month`}
                   >
                     skip
@@ -99,6 +108,7 @@ const TaskList = memo(function TaskList({ tasks, completionMap, currency = '$', 
                   role="status"
                   aria-live="polite"
                   aria-atomic="true"
+                  onClick={e => e.stopPropagation()}
                 >
                   <span className="undo-confirm-label">Removes attached receipt.</span>
                   <button
@@ -202,8 +212,8 @@ function PaymentSlot({ taskId, taskType, defaultAmount, completion, currency = '
                 <span id={`amount-error-${taskId}`} role="alert" className="amount-error">{amountError}</span>
               )}
             </span>
-            <button className="amount-confirm-btn" onClick={saveEdit} title="Save">✓</button>
-            <button className="amount-cancel-btn" onClick={cancelEdit} title="Cancel">✕</button>
+            <button className="amount-confirm-btn" onClick={saveEdit} title="Save" aria-label="Save amount">✓</button>
+            <button className="amount-cancel-btn" onClick={cancelEdit} title="Cancel" aria-label="Cancel editing">✕</button>
           </span>
         ) : (
           // fix 3: meaningful disabled tooltip
@@ -321,8 +331,8 @@ function NoteSlot({ note, onSave }) {
           aria-label="Completion note"
         />
         <span className="note-actions">
-          <button className="amount-confirm-btn" onClick={save} title="Save (Ctrl+Enter)">✓</button>
-          <button className="amount-cancel-btn" onClick={cancel} title="Cancel (Escape)">✕</button>
+          <button className="amount-confirm-btn" onClick={save} title="Save (Ctrl+Enter)" aria-label="Save note">✓</button>
+          <button className="amount-cancel-btn" onClick={cancel} title="Cancel (Escape)" aria-label="Cancel editing">✕</button>
         </span>
       </div>
     )
