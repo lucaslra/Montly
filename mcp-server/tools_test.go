@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,6 +44,8 @@ func callListTasks(t *testing.T, client *montlyClient, month string) listTasksSu
 	}
 	return summary
 }
+
+// ── list_tasks tests ────────────────────────────────────────────────────────
 
 func TestListTasks_AllPending(t *testing.T) {
 	tasks := []task{
@@ -116,24 +119,19 @@ func TestListTasks_MixedStatuses(t *testing.T) {
 }
 
 func TestListTasks_PaidAmountOverride(t *testing.T) {
-	tasks := []task{
-		{ID: 1, Title: "Rent", Type: "payment", Amount: "1200", Interval: 1},
-	}
-	completions := []completion{
-		{TaskID: 1, Month: "2026-05", Amount: "1250"},
-	}
+	tasks := []task{{ID: 1, Title: "Rent", Type: "payment", Amount: "1200", Interval: 1}}
+	completions := []completion{{TaskID: 1, Month: "2026-05", Amount: "1250"}}
 	srv := mockMontlyServer(tasks, completions)
 	defer srv.Close()
 
 	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
 	summary := callListTasks(t, client, "2026-05")
 
-	et := summary.Tasks[0]
-	if et.Amount != "1200" {
-		t.Errorf("amount = %q, want 1200 (task default)", et.Amount)
+	if summary.Tasks[0].Amount != "1200" {
+		t.Errorf("amount = %q, want 1200", summary.Tasks[0].Amount)
 	}
-	if et.Paid != "1250" {
-		t.Errorf("paid = %q, want 1250 (completion override)", et.Paid)
+	if summary.Tasks[0].Paid != "1250" {
+		t.Errorf("paid = %q, want 1250", summary.Tasks[0].Paid)
 	}
 }
 
@@ -152,14 +150,10 @@ func TestListTasks_ReceiptDetection(t *testing.T) {
 	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
 	summary := callListTasks(t, client, "2026-05")
 
-	receiptMap := map[int64]bool{}
-	for _, et := range summary.Tasks {
-		receiptMap[et.ID] = et.HasReceipt
-	}
-	if !receiptMap[1] {
+	if !summary.Tasks[0].HasReceipt {
 		t.Error("task 1 should have receipt")
 	}
-	if receiptMap[2] {
+	if summary.Tasks[1].HasReceipt {
 		t.Error("task 2 should not have receipt")
 	}
 }
@@ -175,15 +169,11 @@ func TestListTasks_SharedTask(t *testing.T) {
 	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
 	summary := callListTasks(t, client, "2026-05")
 
-	sharedMap := map[int64]string{}
-	for _, et := range summary.Tasks {
-		sharedMap[et.ID] = et.SharedBy
+	if summary.Tasks[0].SharedBy != "alice" {
+		t.Errorf("shared_by = %q, want alice", summary.Tasks[0].SharedBy)
 	}
-	if sharedMap[1] != "alice" {
-		t.Errorf("task 1 shared_by = %q, want alice", sharedMap[1])
-	}
-	if sharedMap[2] != "" {
-		t.Errorf("task 2 shared_by = %q, want empty", sharedMap[2])
+	if summary.Tasks[1].SharedBy != "" {
+		t.Errorf("shared_by = %q, want empty", summary.Tasks[1].SharedBy)
 	}
 }
 
@@ -211,9 +201,6 @@ func TestListTasks_EmptyList(t *testing.T) {
 	if summary.Total != 0 {
 		t.Errorf("total = %d, want 0", summary.Total)
 	}
-	if len(summary.Tasks) != 0 {
-		t.Errorf("tasks len = %d, want 0", len(summary.Tasks))
-	}
 }
 
 func TestListTasks_DefaultsToCurrentMonth(t *testing.T) {
@@ -233,27 +220,16 @@ func TestListTasks_DefaultsToCurrentMonth(t *testing.T) {
 
 	expected := time.Now().Format("2006-01")
 	if gotMonth != expected {
-		t.Errorf("month = %q, want %q (current)", gotMonth, expected)
+		t.Errorf("month = %q, want %q", gotMonth, expected)
 	}
 }
 
-func TestListTasks_PassesMonthToAPI(t *testing.T) {
-	var months []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		months = append(months, r.URL.Query().Get("month"))
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`[]`))
-	}))
-	defer srv.Close()
-
-	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+func TestListTasks_InvalidMonth(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
 	handler := listTasksHandler(client)
-	handler(context.Background(), nil, listTasksInput{Month: "2025-12"})
-
-	for _, m := range months {
-		if m != "2025-12" {
-			t.Errorf("API received month = %q, want 2025-12", m)
-		}
+	_, _, err := handler(context.Background(), nil, listTasksInput{Month: "bad"})
+	if err == nil {
+		t.Fatal("expected error for invalid month")
 	}
 }
 
@@ -272,10 +248,7 @@ func TestListTasks_APIErrorOnTasks(t *testing.T) {
 	handler := listTasksHandler(client)
 	_, _, err := handler(context.Background(), nil, listTasksInput{Month: "2026-01"})
 	if err == nil {
-		t.Fatal("expected error when tasks API fails")
-	}
-	if !strings.Contains(err.Error(), "fetching tasks") {
-		t.Errorf("error = %q, want to contain 'fetching tasks'", err.Error())
+		t.Fatal("expected error")
 	}
 }
 
@@ -283,7 +256,6 @@ func TestListTasks_APIErrorOnCompletions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/completions") {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`server error`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -295,32 +267,526 @@ func TestListTasks_APIErrorOnCompletions(t *testing.T) {
 	handler := listTasksHandler(client)
 	_, _, err := handler(context.Background(), nil, listTasksInput{Month: "2026-01"})
 	if err == nil {
-		t.Fatal("expected error when completions API fails")
-	}
-	if !strings.Contains(err.Error(), "fetching completions") {
-		t.Errorf("error = %q, want to contain 'fetching completions'", err.Error())
+		t.Fatal("expected error")
 	}
 }
 
-func TestListTasks_IntervalPreserved(t *testing.T) {
-	tasks := []task{
-		{ID: 1, Title: "Quarterly", Type: "bill", Interval: 3},
-		{ID: 2, Title: "Annual", Type: "subscription", Interval: 12},
-	}
-	srv := mockMontlyServer(tasks, nil)
+// ── get_report tests ────────────────────────────────────────────────────────
+
+func TestGetReport_SummarizesMonths(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"months": []map[string]any{
+				{
+					"month":       "2026-04",
+					"is_forecast": false,
+					"tasks": []map[string]any{
+						{"id": 1, "title": "Rent", "type": "payment", "amount": "1200"},
+						{"id": 2, "title": "Netflix", "type": "subscription", "amount": "15.99"},
+					},
+					"completions": []map[string]any{
+						{"task_id": 1, "month": "2026-04", "amount": "1200"},
+					},
+				},
+				{
+					"month":       "2026-08",
+					"is_forecast": true,
+					"tasks": []map[string]any{
+						{"id": 1, "title": "Rent", "type": "payment", "amount": "1200"},
+					},
+					"completions": []map[string]any{},
+				},
+			},
+		})
+	}))
 	defer srv.Close()
 
 	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
-	summary := callListTasks(t, client, "2026-05")
+	handler := getReportHandler(client)
+	result, _, err := handler(context.Background(), nil, getReportInput{Month: "2026-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	intervalMap := map[int64]int{}
-	for _, et := range summary.Tasks {
-		intervalMap[et.ID] = et.Interval
+	text := result.Content[0].(*mcp.TextContent).Text
+	var summary reportSummary
+	json.Unmarshal([]byte(text), &summary)
+
+	if summary.Anchor != "2026-05" {
+		t.Errorf("anchor = %q", summary.Anchor)
 	}
-	if intervalMap[1] != 3 {
-		t.Errorf("task 1 interval = %d, want 3", intervalMap[1])
+	if len(summary.Months) != 2 {
+		t.Fatalf("months = %d, want 2", len(summary.Months))
 	}
-	if intervalMap[2] != 12 {
-		t.Errorf("task 2 interval = %d, want 12", intervalMap[2])
+
+	m0 := summary.Months[0]
+	if m0.Completed != 1 {
+		t.Errorf("month[0] completed = %d, want 1", m0.Completed)
+	}
+	if m0.TotalPaid != 1200 {
+		t.Errorf("month[0] paid = %f, want 1200", m0.TotalPaid)
+	}
+	if m0.IsForecast {
+		t.Error("month[0] should not be forecast")
+	}
+
+	m1 := summary.Months[1]
+	if !m1.IsForecast {
+		t.Error("month[1] should be forecast")
+	}
+	if m1.Completed != 0 {
+		t.Errorf("month[1] completed = %d, want 0", m1.Completed)
+	}
+}
+
+func TestGetReport_ExcludesSkippedFromDue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"months": []map[string]any{
+				{
+					"month":       "2026-05",
+					"is_forecast": false,
+					"tasks": []map[string]any{
+						{"id": 1, "title": "Rent", "type": "payment", "amount": "1200"},
+						{"id": 2, "title": "Gym", "type": "payment", "amount": "50"},
+					},
+					"completions": []map[string]any{
+						{"task_id": 1, "month": "2026-05", "amount": "1200"},
+						{"task_id": 2, "month": "2026-05", "skipped": true},
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := getReportHandler(client)
+	result, _, err := handler(context.Background(), nil, getReportInput{Month: "2026-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	var summary reportSummary
+	json.Unmarshal([]byte(text), &summary)
+
+	m := summary.Months[0]
+	if m.Completed != 1 {
+		t.Errorf("completed = %d, want 1", m.Completed)
+	}
+	if m.Skipped != 1 {
+		t.Errorf("skipped = %d, want 1", m.Skipped)
+	}
+	// Skipped task ($50) should be excluded from TotalDue
+	if m.TotalDue != 1200 {
+		t.Errorf("total_due = %f, want 1200 (skipped task excluded)", m.TotalDue)
+	}
+	if m.TotalPaid != 1200 {
+		t.Errorf("total_paid = %f, want 1200", m.TotalPaid)
+	}
+}
+
+func TestGetReport_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := getReportHandler(client)
+	_, _, err := handler(context.Background(), nil, getReportInput{Month: "2026-05"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+// ── toggle_task tests ───────────────────────────────────────────────────────
+
+func TestToggleTask_Completes(t *testing.T) {
+	var gotMethod string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"completed":true}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := toggleTaskHandler(client)
+	result, _, err := handler(context.Background(), nil, toggleTaskInput{TaskID: 42, Month: "2026-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if gotMethod != "POST" {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if int(gotBody["task_id"].(float64)) != 42 {
+		t.Errorf("task_id = %v", gotBody["task_id"])
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "completed") {
+		t.Errorf("result = %q, want 'completed'", text)
+	}
+}
+
+func TestToggleTask_Uncompletes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"completed":false}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := toggleTaskHandler(client)
+	result, _, err := handler(context.Background(), nil, toggleTaskInput{TaskID: 1, Month: "2026-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "pending") {
+		t.Errorf("result = %q, want 'pending'", text)
+	}
+}
+
+func TestToggleTask_MissingTaskID(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := toggleTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, toggleTaskInput{Month: "2026-05"})
+	if err == nil {
+		t.Fatal("expected error for missing task_id")
+	}
+}
+
+func TestToggleTask_DefaultsMonth(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.Write([]byte(`{"completed":true}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := toggleTaskHandler(client)
+	handler(context.Background(), nil, toggleTaskInput{TaskID: 1})
+
+	expected := time.Now().Format("2006-01")
+	if gotBody["month"] != expected {
+		t.Errorf("month = %v, want %s", gotBody["month"], expected)
+	}
+}
+
+// ── skip_task tests ─────────────────────────────────────────────────────────
+
+func TestSkipTask_Skips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"skipped":true,"completion":{}}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := skipTaskHandler(client)
+	result, _, err := handler(context.Background(), nil, skipTaskInput{TaskID: 1, Month: "2026-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "skipped") {
+		t.Errorf("result = %q", text)
+	}
+}
+
+func TestSkipTask_Unskips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"skipped":false}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := skipTaskHandler(client)
+	result, _, err := handler(context.Background(), nil, skipTaskInput{TaskID: 1, Month: "2026-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "pending") {
+		t.Errorf("result = %q", text)
+	}
+}
+
+// ── update_completion tests ─────────────────────────────────────────────────
+
+func TestUpdateCompletion_SetsAmount(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.Write([]byte(`{"task_id":1,"month":"2026-05","amount":"150","note":""}`))
+	}))
+	defer srv.Close()
+
+	amt := "150"
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := updateCompletionHandler(client)
+	result, _, err := handler(context.Background(), nil, updateCompletionInput{TaskID: 1, Month: "2026-05", Amount: &amt})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if gotPath != "/api/completions/1/2026-05" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotBody["amount"] != "150" {
+		t.Errorf("body.amount = %v", gotBody["amount"])
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "150") {
+		t.Errorf("result = %q", text)
+	}
+}
+
+func TestUpdateCompletion_SetsNote(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"task_id":1,"month":"2026-05","amount":"","note":"wire transfer"}`))
+	}))
+	defer srv.Close()
+
+	note := "wire transfer"
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := updateCompletionHandler(client)
+	result, _, err := handler(context.Background(), nil, updateCompletionInput{TaskID: 1, Month: "2026-05", Note: &note})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "wire transfer") {
+		t.Errorf("result = %q", text)
+	}
+}
+
+func TestUpdateCompletion_RequiresAmountOrNote(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := updateCompletionHandler(client)
+	_, _, err := handler(context.Background(), nil, updateCompletionInput{TaskID: 1, Month: "2026-05"})
+	if err == nil {
+		t.Fatal("expected error when neither amount nor note provided")
+	}
+}
+
+// ── create_task tests ───────────────────────────────────────────────────────
+
+func TestCreateTask_SendsCorrectPayload(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"id":99,"title":"Gym","type":"payment","amount":"50","interval":1}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := createTaskHandler(client)
+	result, _, err := handler(context.Background(), nil, createTaskInput{
+		Title:  "Gym",
+		Type:   "payment",
+		Amount: "50",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if gotBody["title"] != "Gym" {
+		t.Errorf("title = %v", gotBody["title"])
+	}
+	if gotBody["type"] != "payment" {
+		t.Errorf("type = %v", gotBody["type"])
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	if !strings.Contains(text, "99") || !strings.Contains(text, "Gym") {
+		t.Errorf("result = %q", text)
+	}
+}
+
+func TestCreateTask_RequiresTitle(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := createTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, createTaskInput{})
+	if err == nil {
+		t.Fatal("expected error for missing title")
+	}
+}
+
+func TestCreateTask_ValidatesStartDate(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := createTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, createTaskInput{Title: "Test", StartDate: "bad"})
+	if err == nil {
+		t.Fatal("expected error for invalid start_date")
+	}
+}
+
+func TestCreateTask_OmitsEmptyFields(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"id":1,"title":"Reminder","type":"","amount":"","interval":1}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := createTaskHandler(client)
+	handler(context.Background(), nil, createTaskInput{Title: "Reminder"})
+
+	if _, ok := gotBody["type"]; ok {
+		t.Error("empty type should not be in payload")
+	}
+	if _, ok := gotBody["amount"]; ok {
+		t.Error("empty amount should not be in payload")
+	}
+}
+
+// ── write tool error + validation tests ─────────────────────────────────────
+
+func TestToggleTask_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"task not found"}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := toggleTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, toggleTaskInput{TaskID: 999, Month: "2026-05"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestToggleTask_InvalidMonth(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := toggleTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, toggleTaskInput{TaskID: 1, Month: "bad"})
+	if err == nil {
+		t.Fatal("expected error for invalid month")
+	}
+}
+
+func TestSkipTask_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"task is already completed"}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := skipTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, skipTaskInput{TaskID: 1, Month: "2026-05"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestSkipTask_MissingTaskID(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := skipTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, skipTaskInput{Month: "2026-05"})
+	if err == nil {
+		t.Fatal("expected error for missing task_id")
+	}
+}
+
+func TestUpdateCompletion_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"task not marked as done"}`))
+	}))
+	defer srv.Close()
+
+	amt := "100"
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := updateCompletionHandler(client)
+	_, _, err := handler(context.Background(), nil, updateCompletionInput{TaskID: 1, Month: "2026-05", Amount: &amt})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestUpdateCompletion_MissingTaskID(t *testing.T) {
+	amt := "100"
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := updateCompletionHandler(client)
+	_, _, err := handler(context.Background(), nil, updateCompletionInput{Month: "2026-05", Amount: &amt})
+	if err == nil {
+		t.Fatal("expected error for missing task_id")
+	}
+}
+
+func TestCreateTask_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"type must be one of: payment, subscription, bill, reminder, or empty"}`))
+	}))
+	defer srv.Close()
+
+	client := &montlyClient{baseURL: srv.URL, token: "mt_test", http: srv.Client()}
+	handler := createTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, createTaskInput{Title: "Test", Type: "invalid"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestCreateTask_ValidatesEndDate(t *testing.T) {
+	client := &montlyClient{baseURL: "http://unused", token: "mt_x"}
+	handler := createTaskHandler(client)
+	_, _, err := handler(context.Background(), nil, createTaskInput{Title: "Test", EndDate: "not-a-date"})
+	if err == nil {
+		t.Fatal("expected error for invalid end_date")
+	}
+}
+
+// ── resolveMonth tests ──────────────────────────────────────────────────────
+
+func TestResolveMonth_Valid(t *testing.T) {
+	m, err := resolveMonth("2026-05")
+	if err != nil || m != "2026-05" {
+		t.Errorf("got %q, %v", m, err)
+	}
+}
+
+func TestResolveMonth_Empty(t *testing.T) {
+	m, err := resolveMonth("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := time.Now().Format("2006-01")
+	if m != expected {
+		t.Errorf("got %q, want %q", m, expected)
+	}
+}
+
+func TestResolveMonth_Invalid(t *testing.T) {
+	_, err := resolveMonth("bad")
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }

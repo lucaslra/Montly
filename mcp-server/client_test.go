@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -102,5 +104,69 @@ func TestNewMontlyClient_DefaultsURL(t *testing.T) {
 	c := newMontlyClient()
 	if c.baseURL != "http://localhost:8080" {
 		t.Errorf("baseURL = %q, want default", c.baseURL)
+	}
+}
+
+func TestClientPost_SendsJSONBody(t *testing.T) {
+	var gotMethod, gotContentType string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	c := &montlyClient{baseURL: srv.URL, token: "mt_x", http: srv.Client()}
+	c.post("/completions/toggle", map[string]any{"task_id": 1, "month": "2026-05"})
+
+	if gotMethod != "POST" {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("content-type = %q, want application/json", gotContentType)
+	}
+	if gotBody["month"] != "2026-05" {
+		t.Errorf("body.month = %v", gotBody["month"])
+	}
+}
+
+func TestClientPatch_SendsJSONBody(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := &montlyClient{baseURL: srv.URL, token: "mt_x", http: srv.Client()}
+	c.patch("/completions/1/2026-05", map[string]any{"amount": "100"})
+
+	if gotMethod != "PATCH" {
+		t.Errorf("method = %q, want PATCH", gotMethod)
+	}
+}
+
+func TestMonthQuery_Escapes(t *testing.T) {
+	got := monthQuery("2026-05")
+	if got != "?month=2026-05" {
+		t.Errorf("monthQuery = %q", got)
+	}
+}
+
+func TestIsValidMonth(t *testing.T) {
+	valid := []string{"2026-01", "2026-12", "1999-06"}
+	for _, m := range valid {
+		if !isValidMonth(m) {
+			t.Errorf("isValidMonth(%q) = false, want true", m)
+		}
+	}
+	invalid := []string{"", "2026", "2026-13", "2026-00", "bad", "2026-1", "06-2026"}
+	for _, m := range invalid {
+		if isValidMonth(m) {
+			t.Errorf("isValidMonth(%q) = true, want false", m)
+		}
 	}
 }

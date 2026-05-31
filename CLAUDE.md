@@ -29,6 +29,7 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 - MCP server lives in `mcp-server/` — a separate Go module with its own `Dockerfile`; it wraps the Montly REST API as MCP tools for AI assistants (Claude Desktop, Cursor, etc.)
 - MCP server code is split into `client.go` (HTTP client + API types), `tools.go` (tool handlers + enrichment), `main.go` (server + transport wiring)
 - MCP server runs as a separate Docker container (`ghcr.io/lucaslra/montly-mcp`); uses `MONTLY_URL` + `MONTLY_TOKEN` to talk to the main app, serves MCP over stdio (default) or Streamable HTTP when `MCP_PORT` is set
+- MCP tools: `list_tasks` (read tasks+completions for a month), `get_report` (6-month history + 3-month forecast), `toggle_task` (mark done/undo), `skip_task` (skip/unskip), `update_completion` (set paid amount or note), `create_task` (create recurring task)
 
 ## First-run setup
 On a fresh install with no users in the DB, the app serves a registration form (`SetupView.jsx`) instead of the login screen. The admin account is created via `POST /api/auth/setup`. `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars are still supported for automated/headless deployments but are no longer required. Passwords must be 8–72 characters (bcrypt truncates silently at 72).
@@ -73,9 +74,9 @@ On a fresh install with no users in the DB, the app serves a registration form (
   - `ReportView.test.jsx` — chart rendering, stat cards, loading and empty states
   - `api.test.js` — HTTP layer: status codes, error handling, request shape; covers all API functions including archive, shares, lookup, import
   - `utils.test.js` — `formatAmount` en/eu number formats
-- **MCP server:** `cd mcp-server && go test ./...` — 20 tests covering the HTTP client, tool handler enrichment logic, and server wiring
-  - `client_test.go` — auth header, URL construction, error handling, constructor defaults
-  - `tools_test.go` — all-pending, mixed statuses, paid amount override, receipt detection, shared tasks, notes, empty list, month defaulting, API error propagation
+- **MCP server:** `cd mcp-server && go test ./...` — covers the HTTP client, all 6 tool handlers, input validation, and API error propagation
+  - `client_test.go` — auth header, URL construction, error handling, constructor defaults, POST/PATCH methods, month encoding/validation
+  - `tools_test.go` — list_tasks (pending/mixed/override/receipt/shared/note/empty/default-month/invalid-month/API-errors), get_report (summary/skipped-exclusion/API-error), toggle_task (complete/uncomplete/default-month/missing-id/invalid-month/API-error), skip_task (skip/unskip/missing-id/API-error), update_completion (amount/note/missing-fields/missing-id/API-error), create_task (payload/title-required/date-validation/empty-fields/API-error), resolveMonth
   - `main_test.go` — server creation
 - **E2E:** `make e2e` — Playwright 1.52 against the full Docker stack; 86 tests across 5 suites:
   - `01-auth.spec.ts` — setup flow, login/logout, protected routes, token auth
