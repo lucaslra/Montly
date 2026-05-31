@@ -278,7 +278,7 @@ func parseFloat(s string) float64 {
 // ── toggle_task ─────────────────────────────────────────────────────────────
 
 type toggleTaskInput struct {
-	TaskID int64  `json:"task_id" jsonschema:"required,ID of the task to toggle."`
+	TaskID int64  `json:"task_id" jsonschema:"ID of the task to toggle."`
 	Month  string `json:"month,omitempty" jsonschema:"Month in YYYY-MM format. Defaults to current month."`
 }
 
@@ -316,7 +316,7 @@ func toggleTaskHandler(client *montlyClient) func(context.Context, *mcp.CallTool
 // ── skip_task ───────────────────────────────────────────────────────────────
 
 type skipTaskInput struct {
-	TaskID int64  `json:"task_id" jsonschema:"required,ID of the task to skip or un-skip."`
+	TaskID int64  `json:"task_id" jsonschema:"ID of the task to skip or un-skip."`
 	Month  string `json:"month,omitempty" jsonschema:"Month in YYYY-MM format. Defaults to current month."`
 }
 
@@ -354,7 +354,7 @@ func skipTaskHandler(client *montlyClient) func(context.Context, *mcp.CallToolRe
 // ── update_completion ───────────────────────────────────────────────────────
 
 type updateCompletionInput struct {
-	TaskID int64   `json:"task_id" jsonschema:"required,ID of the task."`
+	TaskID int64   `json:"task_id" jsonschema:"ID of the task."`
 	Month  string  `json:"month,omitempty" jsonschema:"Month in YYYY-MM format. Defaults to current month."`
 	Amount *string `json:"amount,omitempty" jsonschema:"Actual amount paid. Pass empty string to clear the override."`
 	Note   *string `json:"note,omitempty" jsonschema:"Note to attach to this completion."`
@@ -397,7 +397,7 @@ func updateCompletionHandler(client *montlyClient) func(context.Context, *mcp.Ca
 // ── create_task ─────────────────────────────────────────────────────────────
 
 type createTaskInput struct {
-	Title       string `json:"title" jsonschema:"required,Name of the recurring task."`
+	Title       string `json:"title" jsonschema:"Name of the recurring task."`
 	Type        string `json:"type,omitempty" jsonschema:"Task type: payment, subscription, bill, reminder, or empty."`
 	Amount      string `json:"amount,omitempty" jsonschema:"Default amount (e.g. 1200.00). Only for payment/subscription/bill types."`
 	Description string `json:"description,omitempty" jsonschema:"Optional description or details."`
