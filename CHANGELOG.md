@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.22.0] — 2026-05-31
+
+### Added
+- **Click-anywhere task toggle** — clicking anywhere on the task row now toggles completion; added `aria-label` attributes to icon buttons for screen readers.
+
+### Changed
+- **Lighter dark mode** — dark theme backgrounds, surfaces, borders, badge colors, and hover-state overrides bumped ~4 shades lighter for improved readability.
+
+### Fixed
+- **MCP schema descriptions** — removed spurious `required,` prefix from JSON Schema tool descriptions.
+
 ## [0.21.0] — 2026-05-31
 
 ### Added
