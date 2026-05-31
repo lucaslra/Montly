@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.21.0] — 2026-05-31
+
+### Added
+- **MCP tools** — 5 new tools: `get_report` (spending history + forecast), `toggle_task` (mark done/undo), `skip_task`, `update_completion` (set paid amount or note), `create_task`; the server now covers the full daily workflow.
+- **MCP client configs** — setup instructions for Claude Desktop (stdio + HTTP), Claude Code, and Cursor.
+- **MCP user guide** — README rewritten with quickstart, natural-language usage examples for all 6 tools, and a limitations section.
+
+### Fixed
+- **MCP report skip bug** — `get_report` was including skipped tasks in `total_due`, inflating the amount vs what the web UI shows.
+- **MCP `parseFloat`** — replaced `fmt.Sscanf` (silently swallowed errors) with `strconv.ParseFloat`.
+- **MCP shutdown** — `srv.Shutdown` error is now logged instead of silently dropped.
+
+### Changed
+- **MCP client hardened** — unified `do()` method with POST/PATCH support, month validation via regex, URL encoding on all params, 10 MB response body cap. Test count: 20 → 51.
+
 ## [0.20.0] — 2026-05-30
 
 ### Fixed
