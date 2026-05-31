@@ -37,7 +37,7 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 - **First-run setup** — create the admin account through the UI on first access; no env vars needed
 - **API tokens** — headless / mobile client access via `Bearer mt_…` tokens
 - **Settings** — per-user currency symbol, date format, color mode (light/dark/system), task sort order, completed-task position, fiscal year start month, number format (1,234.56 or 1.234,56)
-- **MCP server** — optional sidecar that exposes Montly tasks as [MCP](https://modelcontextprotocol.io) tools for AI assistants (Claude Desktop, Cursor, etc.) — see [`mcp-server/README.md`](mcp-server/README.md)
+- **MCP server** — optional sidecar that exposes Montly as [MCP](https://modelcontextprotocol.io) tools for AI assistants (Claude Desktop, Cursor, etc.) — list tasks, mark done, skip, set amounts, create tasks, get spending reports — see [`mcp-server/README.md`](mcp-server/README.md)
 - **Two databases** — SQLite (default, zero-config) or PostgreSQL
 - **Self-contained** — single Docker image, no external services required for SQLite mode
 
