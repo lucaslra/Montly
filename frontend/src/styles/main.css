@@ -29,9 +29,9 @@
 }
 
 [data-theme="dark"] {
-  --bg:       #0f1117;
-  --surface:  #1a1d27;
-  --border:   #2d3148;
+  --bg:       #282b35;
+  --surface:  #343842;
+  --border:   #4e546e;
   --text:     #e8eaf0;
   --muted:    #8b93a8;
   --primary:  #4f8ef7;
@@ -40,13 +40,13 @@
   --success:  #4ade80;
   --hover:    rgba(255, 255, 255, 0.08);
   /* fix 8: badge variables for dark */
-  --badge-payment-bg:      #3b2e0a;
+  --badge-payment-bg:      #564718;
   --badge-payment-text:    #fbbf24;
-  --badge-subscription-bg:  #2d1f5e;
+  --badge-subscription-bg:  #463578;
   --badge-subscription-text:#a78bfa;
-  --badge-bill-bg:          #0c2033;
+  --badge-bill-bg:          #1e3a52;
   --badge-bill-text:        #38bdf8;
-  --badge-reminder-bg:      #3b1f0a;
+  --badge-reminder-bg:      #563618;
   --badge-reminder-text:    #fb923c;
   color-scheme: dark;
 }
@@ -657,6 +657,8 @@ body {
 .btn-icon:hover            { background: var(--bg); }
 .btn-icon.btn-danger       { color: var(--danger); border-color: #fecaca; }
 .btn-icon.btn-danger:hover { background: #fef2f2; }
+[data-theme="dark"] .btn-icon.btn-danger       { border-color: #912424; }
+[data-theme="dark"] .btn-icon.btn-danger:hover { background: #4d1818; }
 
 /* ── Modal ───────────────────────────────────────── */
 .modal-overlay {
@@ -1293,19 +1295,15 @@ body {
 
 
 /* ── Dark mode overrides ─────────────────────────── */
-[data-theme="dark"] .btn-icon.btn-danger:hover {
-  background: #3b1010;
-}
 [data-theme="dark"] .btn-icon.btn-warning       { color: #fbbf24; border-color: #78350f; }
-[data-theme="dark"] .btn-icon.btn-warning:hover { background: #1c1208; }
+[data-theme="dark"] .btn-icon.btn-warning:hover { background: #2e1f10; }
 [data-theme="dark"] .amount-confirm-btn:hover {
-  background: #0d2b18;
+  background: #1a3d28;
 }
 [data-theme="dark"] .error-banner {
-  background: #3b1010;
-  border-color: #7f1d1d;
+  background: #4d1818;
+  border-color: #912424;
 }
-[data-theme="dark"] .amount-confirm-btn:hover { background: #0d2b18; }
 
 /* fix 1: toast notification */
 @keyframes toast-in {
