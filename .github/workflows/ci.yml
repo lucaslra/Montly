@@ -123,7 +123,7 @@ jobs:
 
       - name: Build montly image
         if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.docker == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
@@ -132,7 +132,7 @@ jobs:
 
       - name: Build montly-mcp image
         if: needs.changes.outputs.mcp == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./mcp-server
           push: false
