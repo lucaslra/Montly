@@ -510,6 +510,16 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	taskCount, err := h.db.CountTasksForUser(id)
+	if err != nil {
+		writeServerError(w, "failed to check user tasks", err)
+		return
+	}
+	if taskCount > 0 {
+		writeError(w, "user still owns tasks; delete or reassign them first", http.StatusConflict)
+		return
+	}
+
 	if err := h.db.DeleteUser(id); err != nil {
 		writeServerError(w, "failed to delete user", err)
 		return

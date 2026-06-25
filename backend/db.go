@@ -153,6 +153,13 @@ func initDB(dsn, driver string) (*DB, error) {
 		db.SetMaxOpenConns(1)
 	}
 
+	if driver != "postgres" {
+		// WAL mode allows concurrent readers alongside the writer; synchronous=NORMAL
+		// is safe with WAL and gives a meaningful durability/throughput improvement.
+		db.Exec("PRAGMA journal_mode=WAL")    //nolint:errcheck
+		db.Exec("PRAGMA synchronous=NORMAL")  //nolint:errcheck
+	}
+
 	var migrateErr error
 	if driver == "postgres" {
 		migrateErr = migratePostgres(db)
@@ -1271,14 +1278,14 @@ func (db *DB) ImportCompletionsCSV(userID int64, rows []ImportRow) (ImportResult
 				// Create a minimal placeholder task.
 				if db.driver == "postgres" {
 					err = tx.QueryRow(
-						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`),
-						row.Title, "", row.Type, "{}", userID, 1,
+						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval, start_date) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`),
+						row.Title, "", row.Type, "{}", userID, 1, row.Month,
 					).Scan(&id)
 				} else {
 					var res sql.Result
 					res, err = tx.Exec(
-						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval) VALUES (?, ?, ?, ?, ?, ?)`),
-						row.Title, "", row.Type, "{}", userID, 1,
+						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval, start_date) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+						row.Title, "", row.Type, "{}", userID, 1, row.Month,
 					)
 					if err == nil {
 						id, err = res.LastInsertId()
@@ -1360,6 +1367,12 @@ func (db *DB) CountUsers() (int, error) {
 func (db *DB) CountAdmins() (int, error) {
 	var n int
 	err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE is_admin = 1`).Scan(&n)
+	return n, err
+}
+
+func (db *DB) CountTasksForUser(userID int64) (int, error) {
+	var n int
+	err := db.QueryRow(db.q(`SELECT COUNT(*) FROM tasks WHERE user_id = ?`), userID).Scan(&n)
 	return n, err
 }
 

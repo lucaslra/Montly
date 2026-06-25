@@ -1504,3 +1504,93 @@ func TestTaskActiveInMonth(t *testing.T) {
 		}
 	})
 }
+
+func TestWALMode(t *testing.T) {
+	dir := t.TempDir()
+	db, err := initDB(dir+"/test.db", "sqlite")
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	defer db.Close()
+
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Errorf("journal_mode: got %q, want wal", mode)
+	}
+
+	var sync int
+	if err := db.QueryRow("PRAGMA synchronous").Scan(&sync); err != nil {
+		t.Fatalf("PRAGMA synchronous: %v", err)
+	}
+	// synchronous=NORMAL is 1
+	if sync != 1 {
+		t.Errorf("synchronous: got %d, want 1 (NORMAL)", sync)
+	}
+}
+
+// TestWALModeInMemory verifies that the in-memory DBs used in other tests don't
+// error on WAL pragma (SQLite silently keeps memory mode for :memory: DBs).
+func TestWALModeInMemory(t *testing.T) {
+	db := setupTestDB(t)
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	// :memory: databases stay in "memory" mode regardless of WAL pragma — that's expected.
+	if mode != "memory" && mode != "wal" {
+		t.Errorf("unexpected journal_mode %q", mode)
+	}
+}
+
+func TestImportCompletionsCSV_TaskVisibleInGetTasks(t *testing.T) {
+	newUser := func(t *testing.T, db *DB, name string) User {
+		t.Helper()
+		h, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.MinCost)
+		if err != nil {
+			t.Fatalf("bcrypt: %v", err)
+		}
+		u, err := db.CreateUser(name, string(h), false)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		return u
+	}
+
+	t.Run("imported task visible in GetTasks for the imported month", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := newUser(t, db, "alice")
+		rows := []ImportRow{{Title: "Old Bill", Type: "bill", Month: "2025-01", Status: "completed", Amount: "50"}}
+		if _, err := db.ImportCompletionsCSV(alice.ID, rows); err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		tasks, err := db.GetTasks("2025-01", alice.ID)
+		if err != nil {
+			t.Fatalf("GetTasks: %v", err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("GetTasks(2025-01): got %d tasks, want 1", len(tasks))
+		}
+		if tasks[0].Title != "Old Bill" {
+			t.Errorf("title: got %q, want Old Bill", tasks[0].Title)
+		}
+	})
+
+	t.Run("imported task does not bleed into months before start_date", func(t *testing.T) {
+		db := setupTestDB(t)
+		alice := newUser(t, db, "alice")
+		rows := []ImportRow{{Title: "Old Bill", Type: "bill", Month: "2025-06", Status: "completed", Amount: "50"}}
+		if _, err := db.ImportCompletionsCSV(alice.ID, rows); err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		tasks, err := db.GetTasks("2025-05", alice.ID)
+		if err != nil {
+			t.Fatalf("GetTasks: %v", err)
+		}
+		if len(tasks) != 0 {
+			t.Errorf("GetTasks(2025-05): got %d tasks, want 0 (task starts in 2025-06)", len(tasks))
+		}
+	})
+}

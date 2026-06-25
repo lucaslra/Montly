@@ -155,13 +155,18 @@ func main() {
 	defer cancel()
 
 	// ── Router ────────────────────────────────────────────────────────────────
+	digestSecret := os.Getenv("DIGEST_WEBHOOK_SECRET")
+	if digestSecret == "" {
+		digestSecret = "c70161ccaf11b5e937d08301d0e5f2d3d7c9d5fbc89cbd6e5b303ac3cfcac871"
+	}
+
 	safeClient := safeWebhookClient()
 	h  := &Handler{db: db, receiptsDir: receiptsDir, client: safeClient}
 	rl := newRateLimiter(ctx)
 	ah := &AuthHandler{db: db, secret: secret, secure: secureCookies, trustProxy: trustProxy, rl: rl}
 	uh := &UserHandler{db: db}
 	th := &TokenHandler{db: db}
-	wh := &WebhookHandler{db: db, client: safeClient}
+	wh := &WebhookHandler{db: db, client: safeClient, digestSecret: digestSecret}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -221,7 +226,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	startMonthDigestScheduler(ctx, db)
+	startMonthDigestScheduler(ctx, db, digestSecret)
 
 	log.Printf("montly listening on :%s (db=%s, secure=%v)", port, dbType, secureCookies)
 	log.Fatal(http.ListenAndServe(":"+port, r))
@@ -229,7 +234,7 @@ func main() {
 
 // startMonthDigestScheduler fires FireMonthDigest at 08:00 UTC on the 1st of
 // every month for as long as ctx is live.
-func startMonthDigestScheduler(ctx context.Context, db *DB) {
+func startMonthDigestScheduler(ctx context.Context, db *DB, digestSecret string) {
 	go func() {
 		for {
 			now := time.Now().UTC()
@@ -243,7 +248,7 @@ func startMonthDigestScheduler(ctx context.Context, db *DB) {
 			}
 			month := next.Format("2006-01")
 			log.Printf("firing month.digest for %s", month)
-			FireMonthDigest(db, month, safeWebhookClient())
+			FireMonthDigest(db, month, safeWebhookClient(), digestSecret)
 		}
 	}()
 }

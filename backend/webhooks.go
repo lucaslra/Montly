@@ -110,8 +110,9 @@ var allowedWebhookEvents = map[string]bool{
 
 // WebhookHandler handles CRUD for webhooks.
 type WebhookHandler struct {
-	db     *DB
-	client *http.Client
+	db           *DB
+	client       *http.Client
+	digestSecret string
 }
 
 // webhookResponse is the API-safe view of a Webhook (omits secret).
@@ -264,6 +265,9 @@ func (h *WebhookHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Montly-Webhook/1")
+	if event == "month.digest" && h.digestSecret != "" {
+		req.Header.Set("X-Montly-Secret", h.digestSecret)
+	}
 	if hook.Secret != "" {
 		mac := hmac.New(sha256.New, []byte(hook.Secret))
 		mac.Write(body)
@@ -353,14 +357,20 @@ func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, m
 	}
 }
 
+// maxDigestConcurrency caps the number of simultaneous outbound HTTP deliveries
+// across all users during a month.digest run.
+const maxDigestConcurrency = 20
+
 // FireMonthDigest sends a month.digest webhook to every user subscribed to that
 // event. Called by the monthly scheduler; runs entirely in background goroutines.
-func FireMonthDigest(db *DB, month string, client *http.Client) {
+func FireMonthDigest(db *DB, month string, client *http.Client, digestSecret string) {
 	users, err := db.ListUsers()
 	if err != nil {
 		log.Printf("FireMonthDigest: list users: %v", err)
 		return
 	}
+
+	sem := make(chan struct{}, maxDigestConcurrency)
 
 	for _, u := range users {
 		hooks, err := db.GetWebhooksForUser(u.ID)
@@ -408,7 +418,9 @@ func FireMonthDigest(db *DB, month string, client *http.Client) {
 		body, _ := json.Marshal(payload)
 
 		for _, hook := range digestHooks {
+			sem <- struct{}{}
 			go func(h Webhook) {
+				defer func() { <-sem }()
 				req, err := http.NewRequest(http.MethodPost, h.URL, bytes.NewReader(body))
 				if err != nil {
 					log.Printf("FireMonthDigest(%d): build request: %v", h.ID, err)
@@ -416,6 +428,9 @@ func FireMonthDigest(db *DB, month string, client *http.Client) {
 				}
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("User-Agent", "Montly-Webhook/1")
+				if digestSecret != "" {
+					req.Header.Set("X-Montly-Secret", digestSecret)
+				}
 				if h.Secret != "" {
 					mac := hmac.New(sha256.New, []byte(h.Secret))
 					mac.Write(body)

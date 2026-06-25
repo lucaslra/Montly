@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2626,7 +2627,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 
 		hit := cap.waitHit(t)
 		var payload digestPayload
@@ -2653,7 +2654,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "") // NOT month.digest
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 		cap.expectNoHit(t)
 	})
 
@@ -2667,7 +2668,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 
 		hit := cap.waitHit(t)
 		var payload digestPayload
@@ -2688,7 +2689,7 @@ func TestFireMonthDigest(t *testing.T) {
 		defer cap.close()
 		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", secret)
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second})
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 
 		hit := cap.waitHit(t)
 		sig := hit.headers.Get("X-Montly-Signature")
@@ -2700,6 +2701,190 @@ func TestFireMonthDigest(t *testing.T) {
 		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 		if sig != expected {
 			t.Errorf("signature mismatch: got %q, want %q", sig, expected)
+		}
+	})
+
+	t.Run("X-Montly-Secret header sent when digestSecret is non-empty", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "my-digest-secret")
+
+		hit := cap.waitHit(t)
+		if got := hit.headers.Get("X-Montly-Secret"); got != "my-digest-secret" {
+			t.Errorf("X-Montly-Secret: got %q, want my-digest-secret", got)
+		}
+	})
+
+	t.Run("X-Montly-Secret header absent when digestSecret is empty", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		cap := newWebhookCapture()
+		defer cap.close()
+		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+
+		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
+
+		hit := cap.waitHit(t)
+		if got := hit.headers.Get("X-Montly-Secret"); got != "" {
+			t.Errorf("X-Montly-Secret: got %q, want empty (no secret configured)", got)
+		}
+	})
+}
+
+func TestIsPrivateIP(t *testing.T) {
+	private := []string{
+		"127.0.0.1",
+		"127.255.255.255",
+		"10.0.0.1",
+		"10.255.255.255",
+		"172.16.0.1",
+		"172.31.255.255",
+		"192.168.0.1",
+		"192.168.255.255",
+		"169.254.169.254", // AWS/GCP/Azure metadata endpoint
+		"169.254.0.1",
+		"::1",            // IPv6 loopback
+		"fc00::1",        // IPv6 unique local
+		"fe80::1",        // IPv6 link-local
+		"100.64.0.1",     // carrier-grade NAT (RFC 6598)
+		"0.0.0.1",        // "this" network
+	}
+	for _, addr := range private {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			t.Errorf("failed to parse IP %q", addr)
+			continue
+		}
+		if !isPrivateIP(ip) {
+			t.Errorf("isPrivateIP(%q) = false, want true", addr)
+		}
+	}
+
+	public := []string{
+		"1.1.1.1",
+		"8.8.8.8",
+		"93.184.216.34",        // example.com
+		"2001:4860:4860::8888", // Google IPv6 DNS
+	}
+	for _, addr := range public {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			t.Errorf("failed to parse IP %q", addr)
+			continue
+		}
+		if isPrivateIP(ip) {
+			t.Errorf("isPrivateIP(%q) = true, want false", addr)
+		}
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("required headers present when secure=false", func(t *testing.T) {
+		h := securityHeaders(false)(handler)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+
+		for header, want := range map[string]string{
+			"X-Content-Type-Options": "nosniff",
+			"X-Frame-Options":        "DENY",
+			"Referrer-Policy":        "strict-origin-when-cross-origin",
+		} {
+			if got := w.Header().Get(header); got != want {
+				t.Errorf("%s: got %q, want %q", header, got, want)
+			}
+		}
+		if csp := w.Header().Get("Content-Security-Policy"); csp == "" {
+			t.Error("Content-Security-Policy header missing")
+		}
+		if hsts := w.Header().Get("Strict-Transport-Security"); hsts != "" {
+			t.Errorf("Strict-Transport-Security present when secure=false: %q", hsts)
+		}
+	})
+
+	t.Run("HSTS present when secure=true", func(t *testing.T) {
+		h := securityHeaders(true)(handler)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+
+		hsts := w.Header().Get("Strict-Transport-Security")
+		if hsts == "" {
+			t.Error("Strict-Transport-Security missing when secure=true")
+		}
+		if !strings.Contains(hsts, "max-age=") {
+			t.Errorf("Strict-Transport-Security missing max-age: %q", hsts)
+		}
+	})
+}
+
+func TestWebhookTest_DigestSecret(t *testing.T) {
+	t.Run("month.digest test delivery includes X-Montly-Secret when set", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		cap := newWebhookCapture()
+		defer cap.close()
+		hook, _ := db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+
+		wh := &WebhookHandler{
+			db:           db,
+			client:       &http.Client{Timeout: 10 * time.Second},
+			digestSecret: "test-digest-secret",
+		}
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", fmt.Sprintf("%d", hook.ID))
+		req := httptest.NewRequest(http.MethodPost, "/api/webhooks/1/test", nil)
+		req = req.WithContext(context.WithValue(
+			context.WithValue(req.Context(), chi.RouteCtxKey, rctx),
+			ctxUserKey, sessionClaims{UserID: user.ID},
+		))
+
+		w := httptest.NewRecorder()
+		wh.TestWebhook(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200", w.Code)
+		}
+
+		hit := cap.waitHit(t)
+		if got := hit.headers.Get("X-Montly-Secret"); got != "test-digest-secret" {
+			t.Errorf("X-Montly-Secret: got %q, want test-digest-secret", got)
+		}
+	})
+
+	t.Run("month.digest test delivery omits X-Montly-Secret when not set", func(t *testing.T) {
+		db := setupTestDB(t)
+		user, _ := db.CreateUser("alice", testHash(t), false)
+		cap := newWebhookCapture()
+		defer cap.close()
+		hook, _ := db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+
+		wh := &WebhookHandler{
+			db:     db,
+			client: &http.Client{Timeout: 10 * time.Second},
+			// digestSecret intentionally not set
+		}
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", fmt.Sprintf("%d", hook.ID))
+		req := httptest.NewRequest(http.MethodPost, "/api/webhooks/1/test", nil)
+		req = req.WithContext(context.WithValue(
+			context.WithValue(req.Context(), chi.RouteCtxKey, rctx),
+			ctxUserKey, sessionClaims{UserID: user.ID},
+		))
+
+		w := httptest.NewRecorder()
+		wh.TestWebhook(w, req)
+
+		hit := cap.waitHit(t)
+		if got := hit.headers.Get("X-Montly-Secret"); got != "" {
+			t.Errorf("X-Montly-Secret: got %q, want empty (no digestSecret configured)", got)
 		}
 	})
 }

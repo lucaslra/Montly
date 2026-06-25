@@ -84,6 +84,7 @@ export default function App() {
   const [completionMap, setCompletionMap] = useState(new Map())
   const completionMapRef = useRef(completionMap)
   completionMapRef.current = completionMap
+  const inFlightRef = useRef(new Set())
   const [view, setView] = useView()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -187,6 +188,8 @@ export default function App() {
   }, [])
 
   const handleToggle = useCallback(async (taskId) => {
+    if (inFlightRef.current.has(taskId)) return
+    inFlightRef.current.add(taskId)
     const prevEntry   = completionMapRef.current.get(taskId)
     const wasCompleted = prevEntry && !prevEntry.skipped
     // Optimistic update.
@@ -220,10 +223,14 @@ export default function App() {
         return next
       })
       onApiError(e)
+    } finally {
+      inFlightRef.current.delete(taskId)
     }
   }, [month, onApiError])
 
   const handleSkip = useCallback(async (taskId) => {
+    if (inFlightRef.current.has(taskId)) return
+    inFlightRef.current.add(taskId)
     const prevEntry = completionMapRef.current.get(taskId)
     const wasSkipped = prevEntry?.skipped === true
     // Optimistic update.
@@ -255,6 +262,8 @@ export default function App() {
         return next
       })
       onApiError(e)
+    } finally {
+      inFlightRef.current.delete(taskId)
     }
   }, [month, onApiError])
 
