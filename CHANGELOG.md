@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.23.0] — 2026-06-25
+
+### Fixed
+- **SQLite WAL mode** — enabled `journal_mode=WAL` and `synchronous=NORMAL` on startup for better read concurrency and write throughput.
+- **Digest webhook goroutine storm** — `FireMonthDigest` now caps concurrent HTTP deliveries at 20 across all users, preventing a goroutine burst on the 1st of every month.
+- **CSV import task visibility** — imported tasks now set `start_date` from the import row's month so they appear correctly in `GetTasks` for historical months.
+- **Delete user with tasks** — `DELETE /api/users/:id` now returns 409 Conflict with a readable message instead of a cryptic 500 when the target user still owns tasks.
+- **Optimistic toggle race** — rapid double-clicks on a task no longer fire two concurrent toggle requests; subsequent clicks are ignored until the first request settles.
+- **Content-Security-Policy** — added a strict CSP header to all responses via the security headers middleware.
+- **Digest webhook secret** — `X-Montly-Secret` header on `month.digest` deliveries is now configurable via `DIGEST_WEBHOOK_SECRET` env var (falls back to the compiled default).
+
+### Changed
+- **CI** — skip unchanged sub-project builds; fixed GHA cache scope collision between backend and frontend jobs.
+
 ## [0.22.0] — 2026-05-31
 
 ### Added
