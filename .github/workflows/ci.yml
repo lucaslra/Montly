@@ -40,7 +40,7 @@ jobs:
       mcp: ${{ steps.filter.outputs.mcp }}
       docker: ${{ steps.filter.outputs.docker }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dorny/paths-filter@v3
         id: filter
@@ -62,7 +62,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:
@@ -78,7 +78,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -98,7 +98,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mcp == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:
@@ -117,7 +117,7 @@ jobs:
       !contains(needs.*.result, 'failure') &&
       (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.docker == 'true' || needs.changes.outputs.mcp == 'true')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
