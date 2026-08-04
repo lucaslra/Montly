@@ -204,24 +204,31 @@ test.describe.serial('Task management', () => {
     expect(restored).toBe(initial)
   })
 
-  test('deletes the reminder task via inline confirm', async ({ page }) => {
+  // Active tasks are removed via the archive flow (Edit / Share / Archive);
+  // permanent deletion happens from the Archived section.
+  test('archives the reminder task via inline confirm', async ({ page }) => {
     await page.goto('/manage')
     const dentistItem = page.locator('.manage-item', { hasText: 'Call dentist' })
 
-    await dentistItem.locator('button.btn-danger').click()
-    // Confirm dialog appears inline
+    await dentistItem.locator('button:has-text("Archive")').click()
+    // Inline confirm appears
     await expect(dentistItem.locator('.delete-confirm')).toBeVisible()
     await dentistItem.locator('button', { hasText: 'Yes' }).click()
 
+    // Removed from the active list
     await expect(page.locator('.manage-item', { hasText: 'Call dentist' })).not.toBeVisible()
     await expect(page.locator('.manage-item')).toHaveCount(2)
+
+    // Still recoverable from the Archived section
+    await page.click('button.archived-toggle')
+    await expect(page.locator('.archived-item', { hasText: 'Call dentist' })).toBeVisible()
   })
 
-  test('No button on delete confirm cancels deletion', async ({ page }) => {
+  test('No button on archive confirm cancels', async ({ page }) => {
     await page.goto('/manage')
     const rentItem = page.locator('.manage-item', { hasText: 'Monthly Rent (updated)' })
 
-    await rentItem.locator('button.btn-danger').click()
+    await rentItem.locator('button:has-text("Archive")').click()
     await expect(rentItem.locator('.delete-confirm')).toBeVisible()
     await rentItem.locator('button', { hasText: 'No' }).click()
 

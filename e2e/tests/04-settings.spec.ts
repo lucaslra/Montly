@@ -1,4 +1,12 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
+
+// Settings is organized into tabs (Preferences, Password, API Tokens, Webhooks,
+// Users, Audit); only the active tab's panel is rendered visible. Nested
+// describe blocks activate the relevant tab in a beforeEach before asserting on
+// that section's content.
+async function openTab(page: Page, name: string) {
+  await page.getByRole('tab', { name }).click()
+}
 
 test.describe.serial('Settings', () => {
   test.beforeEach(async ({ page }) => {
@@ -6,7 +14,7 @@ test.describe.serial('Settings', () => {
     await expect(page.locator('h2', { hasText: 'Settings' })).toBeVisible()
   })
 
-  // ── Preferences form ──────────────────────────────────────────────────────
+  // ── Preferences form (default active tab) ─────────────────────────────────
 
   test('settings page renders all form fields', async ({ page }) => {
     await expect(page.locator('#s-currency')).toBeVisible()
@@ -69,184 +77,197 @@ test.describe.serial('Settings', () => {
 
   // ── Change password ───────────────────────────────────────────────────────
 
-  test('change password section is present', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'Change Password' })).toBeVisible()
-    await expect(page.locator('#pw-current')).toBeVisible()
-    await expect(page.locator('#pw-new')).toBeVisible()
-    await expect(page.locator('#pw-confirm')).toBeVisible()
-  })
+  test.describe('Change password', () => {
+    test.beforeEach(async ({ page }) => { await openTab(page, 'Password') })
 
-  test('rejects mismatched new passwords', async ({ page }) => {
-    await page.fill('#pw-current', process.env.ADMIN_PASS ?? 'adminpass123')
-    await page.fill('#pw-new', 'newpassword99')
-    await page.fill('#pw-confirm', 'differentpassword99')
-    await page.click('button:has-text("Update password")')
+    test('change password section is present', async ({ page }) => {
+      await expect(page.locator('h3', { hasText: 'Change Password' })).toBeVisible()
+      await expect(page.locator('#pw-current')).toBeVisible()
+      await expect(page.locator('#pw-new')).toBeVisible()
+      await expect(page.locator('#pw-confirm')).toBeVisible()
+    })
 
-    await expect(page.locator('.form-error')).toContainText('match')
-  })
+    test('rejects mismatched new passwords', async ({ page }) => {
+      await page.fill('#pw-current', process.env.ADMIN_PASS ?? 'adminpass123')
+      await page.fill('#pw-new', 'newpassword99')
+      await page.fill('#pw-confirm', 'differentpassword99')
+      await page.click('button:has-text("Update password")')
 
-  test('rejects new password shorter than 8 characters', async ({ page }) => {
-    await page.fill('#pw-current', process.env.ADMIN_PASS ?? 'adminpass123')
-    await page.fill('#pw-new', 'short')
-    await page.fill('#pw-confirm', 'short')
-    await page.click('button:has-text("Update password")')
+      await expect(page.locator('.form-error')).toContainText('match')
+    })
 
-    await expect(page.locator('.form-error')).toContainText('8 characters')
+    test('rejects new password shorter than 8 characters', async ({ page }) => {
+      await page.fill('#pw-current', process.env.ADMIN_PASS ?? 'adminpass123')
+      await page.fill('#pw-new', 'short')
+      await page.fill('#pw-confirm', 'short')
+      await page.click('button:has-text("Update password")')
+
+      await expect(page.locator('.form-error')).toContainText('8 characters')
+    })
   })
 
   // ── API Tokens ────────────────────────────────────────────────────────────
 
-  test('API tokens section is present', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'API Tokens' })).toBeVisible()
-    await expect(page.locator('#token-name-input')).toBeVisible()
-  })
+  test.describe('API Tokens', () => {
+    test.beforeEach(async ({ page }) => { await openTab(page, 'API Tokens') })
 
-  test('creates a named API token', async ({ page }) => {
-    await page.fill('#token-name-input', 'e2e-test-token')
-    await page.click('button:has-text("Create token")')
+    test('API tokens section is present', async ({ page }) => {
+      await expect(page.locator('h3', { hasText: 'API Tokens' })).toBeVisible()
+      await expect(page.locator('#token-name-input')).toBeVisible()
+    })
 
-    // Plaintext reveal appears
-    await expect(page.locator('.token-reveal')).toBeVisible()
-    await expect(page.locator('.token-reveal-label')).toContainText('not be shown again')
+    test('creates a named API token', async ({ page }) => {
+      await page.fill('#token-name-input', 'e2e-test-token')
+      await page.click('button:has-text("Create token")')
 
-    const tokenText = (await page.locator('.token-reveal code').textContent()) ?? ''
-    expect(tokenText.length).toBeGreaterThan(10)
+      // Plaintext reveal appears
+      await expect(page.locator('.token-reveal')).toBeVisible()
+      await expect(page.locator('.token-reveal-label')).toContainText('not be shown again')
 
-    // Copy button works
-    await page.click('.token-reveal button:has-text("Copy")')
-    await expect(page.locator('.token-reveal button:has-text("Copied!")')).toBeVisible()
-  })
+      const tokenText = (await page.locator('.token-reveal code').textContent()) ?? ''
+      expect(tokenText.length).toBeGreaterThan(10)
 
-  test('token appears in the list after creation', async ({ page }) => {
-    await expect(page.locator('.settings-list-name', { hasText: 'e2e-test-token' })).toBeVisible()
-  })
+      // Copy button works
+      await page.click('.token-reveal button:has-text("Copy")')
+      await expect(page.locator('.token-reveal button:has-text("Copied!")')).toBeVisible()
+    })
 
-  test('dismisses token reveal', async ({ page }) => {
-    // If the reveal is still visible, dismiss it
-    const reveal = page.locator('.token-reveal')
-    if (await reveal.isVisible()) {
+    test('token appears in the list after creation', async ({ page }) => {
+      await expect(page.locator('.settings-list-name', { hasText: 'e2e-test-token' })).toBeVisible()
+    })
+
+    test('dismisses token reveal', async ({ page }) => {
+      // If the reveal is still visible, dismiss it
+      const reveal = page.locator('.token-reveal')
+      if (await reveal.isVisible()) {
+        await page.click('button:has-text("Dismiss")')
+      }
+      await expect(reveal).not.toBeVisible()
+    })
+
+    test('creates an unnamed token', async ({ page }) => {
+      await page.click('button:has-text("Create token")')
+      await expect(page.locator('.token-reveal')).toBeVisible()
       await page.click('button:has-text("Dismiss")')
-    }
-    await expect(reveal).not.toBeVisible()
-  })
+      // Unnamed token shows "unnamed" in italic
+      await expect(page.locator('.settings-list-name em', { hasText: 'unnamed' }).first()).toBeVisible()
+    })
 
-  test('creates an unnamed token', async ({ page }) => {
-    await page.click('button:has-text("Create token")')
-    await expect(page.locator('.token-reveal')).toBeVisible()
-    await page.click('button:has-text("Dismiss")')
-    // Unnamed token shows "unnamed" in italic
-    await expect(page.locator('.settings-list-name em', { hasText: 'unnamed' }).first()).toBeVisible()
-  })
+    test('revokes a token with confirmation', async ({ page }) => {
+      const tokenItem = page.locator('.settings-list-item', { hasText: 'e2e-test-token' })
+      await tokenItem.locator('button:has-text("Revoke")').click()
 
-  test('revokes a token with confirmation', async ({ page }) => {
-    const tokenItem = page.locator('.settings-list-item', { hasText: 'e2e-test-token' })
-    await tokenItem.locator('button:has-text("Revoke")').click()
+      // Confirm dialog
+      await expect(tokenItem.locator('[role="alert"]')).toContainText('Revoke?')
+      await tokenItem.locator('button:has-text("Yes")').click()
 
-    // Confirm dialog
-    await expect(tokenItem.locator('[role="alert"]')).toContainText('Revoke?')
-    await tokenItem.locator('button:has-text("Yes")').click()
+      await expect(page.locator('.settings-list-name', { hasText: 'e2e-test-token' })).not.toBeVisible()
+    })
 
-    await expect(page.locator('.settings-list-name', { hasText: 'e2e-test-token' })).not.toBeVisible()
-  })
+    test('cancels token revocation via No button', async ({ page }) => {
+      const tokenItem = page.locator('.settings-list-item').first()
+      const name = (await tokenItem.locator('.settings-list-name').textContent()) ?? ''
 
-  test('cancels token revocation via No button', async ({ page }) => {
-    const tokenItem = page.locator('.settings-list-item').first()
-    const name = (await tokenItem.locator('.settings-list-name').textContent()) ?? ''
+      await tokenItem.locator('button:has-text("Revoke")').click()
+      await tokenItem.locator('button:has-text("No")').click()
 
-    await tokenItem.locator('button:has-text("Revoke")').click()
-    await tokenItem.locator('button:has-text("No")').click()
+      await expect(page.locator('.settings-list-name', { hasText: name })).toBeVisible()
+    })
 
-    await expect(page.locator('.settings-list-name', { hasText: name })).toBeVisible()
-  })
-
-  // Clean up the unnamed token left from earlier
-  test('revokes the unnamed token', async ({ page }) => {
-    const unnamedItem = page.locator('.settings-list-item', { has: page.locator('em', { hasText: 'unnamed' }) }).first()
-    await unnamedItem.locator('button:has-text("Revoke")').click()
-    await unnamedItem.locator('button:has-text("Yes")').click()
-    await expect(page.locator('p.settings-empty', { hasText: 'No tokens' })).toBeVisible()
+    // Clean up the unnamed token left from earlier
+    test('revokes the unnamed token', async ({ page }) => {
+      const unnamedItem = page.locator('.settings-list-item', { has: page.locator('em', { hasText: 'unnamed' }) }).first()
+      await unnamedItem.locator('button:has-text("Revoke")').click()
+      await unnamedItem.locator('button:has-text("Yes")').click()
+      await expect(page.locator('p.settings-empty', { hasText: 'No tokens' })).toBeVisible()
+    })
   })
 
   // ── Webhooks ──────────────────────────────────────────────────────────────
 
-  test('webhooks section is present', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'Webhooks' })).toBeVisible()
-    await expect(page.locator('#wh-url')).toBeVisible()
-  })
+  test.describe('Webhooks', () => {
+    test.beforeEach(async ({ page }) => { await openTab(page, 'Webhooks') })
 
-  test('webhook creation requires a URL', async ({ page }) => {
-    await page.click('button:has-text("Create webhook")')
-    // HTML5 validation prevents submission — URL field should be invalid
-    await expect(page.locator('#wh-url:invalid')).toBeVisible()
+    test('webhooks section is present', async ({ page }) => {
+      await expect(page.locator('h3', { hasText: 'Webhooks' })).toBeVisible()
+      await expect(page.locator('#wh-url')).toBeVisible()
+    })
+
+    test('webhook creation requires a URL', async ({ page }) => {
+      await page.click('button:has-text("Create webhook")')
+      // HTML5 validation prevents submission — URL field should be invalid
+      await expect(page.locator('#wh-url:invalid')).toBeVisible()
+    })
   })
 
   // ── User management (admin only) ──────────────────────────────────────────
 
-  test('Users section is visible for admin', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'Users' })).toBeVisible()
-  })
+  test.describe('User management', () => {
+    test.beforeEach(async ({ page }) => { await openTab(page, 'Users') })
 
-  test('creates a new user', async ({ page }) => {
-    await page.locator('h3', { hasText: 'Users' }).scrollIntoViewIfNeeded()
-
-    await page.fill('#u-username', 'e2etestuser')
-    await page.fill('#u-password', 'testpassword123')
-    await page.click('button:has-text("Create user")')
-
-    await expect(page.locator('.settings-list-name', { hasText: 'e2etestuser' })).toBeVisible()
-  })
-
-  test('new user can log in', async ({ browser }) => {
-    // Create a context with explicit empty storage and baseURL so goto('/') resolves correctly
-    const ctx = await browser.newContext({
-      baseURL: process.env.BASE_URL ?? 'http://localhost:8080',
-      storageState: { cookies: [], origins: [] },
+    test('Users section is visible for admin', async ({ page }) => {
+      await expect(page.locator('h3', { hasText: 'Users' })).toBeVisible()
     })
-    const newPage = await ctx.newPage()
 
-    await newPage.goto('/')
-    await expect(newPage.locator('.login-card')).toBeVisible({ timeout: 15000 })
+    test('creates a new user', async ({ page }) => {
+      await page.fill('#u-username', 'e2etestuser')
+      await page.fill('#u-password', 'testpassword123')
+      await page.click('button:has-text("Create user")')
 
-    await newPage.fill('#login-username', 'e2etestuser')
-    await newPage.fill('#login-password', 'testpassword123')
-    await newPage.click('button[type="submit"]')
-    await expect(newPage.locator('.app-header')).toBeVisible()
+      await expect(page.locator('.settings-list-name', { hasText: 'e2etestuser' })).toBeVisible()
+    })
 
-    await ctx.close()
-  })
+    test('new user can log in', async ({ browser }) => {
+      // Create a context with explicit empty storage and baseURL so goto('/') resolves correctly
+      const ctx = await browser.newContext({
+        baseURL: process.env.BASE_URL ?? 'http://localhost:8080',
+        storageState: { cookies: [], origins: [] },
+      })
+      const newPage = await ctx.newPage()
 
-  test('deletes the created user with confirmation', async ({ page }) => {
-    await page.locator('h3', { hasText: 'Users' }).scrollIntoViewIfNeeded()
+      await newPage.goto('/')
+      await expect(newPage.locator('.login-card')).toBeVisible({ timeout: 15000 })
 
-    const userItem = page.locator('.settings-list-item', { hasText: 'e2etestuser' })
-    await userItem.locator('button:has-text("Delete")').click()
+      await newPage.fill('#login-username', 'e2etestuser')
+      await newPage.fill('#login-password', 'testpassword123')
+      await newPage.click('button[type="submit"]')
+      await expect(newPage.locator('.app-header')).toBeVisible()
 
-    await expect(userItem.locator('[role="alert"]')).toContainText('Delete?')
-    await userItem.locator('button:has-text("Yes")').click()
+      await ctx.close()
+    })
 
-    await expect(page.locator('.settings-list-name', { hasText: 'e2etestuser' })).not.toBeVisible()
-  })
+    test('deletes the created user with confirmation', async ({ page }) => {
+      const userItem = page.locator('.settings-list-item', { hasText: 'e2etestuser' })
+      await userItem.locator('button:has-text("Delete")').click()
 
-  test('admin cannot delete themselves', async ({ page }) => {
-    await page.locator('h3', { hasText: 'Users' }).scrollIntoViewIfNeeded()
+      await expect(userItem.locator('[role="alert"]')).toContainText('Delete?')
+      await userItem.locator('button:has-text("Yes")').click()
 
-    // The admin's own row should not have a Delete button
-    const adminName = process.env.ADMIN_USER ?? 'admin'
-    const adminItem = page.locator('.settings-list-item', { hasText: adminName })
-    await expect(adminItem.locator('button:has-text("Delete")')).not.toBeVisible()
+      await expect(page.locator('.settings-list-name', { hasText: 'e2etestuser' })).not.toBeVisible()
+    })
+
+    test('admin cannot delete themselves', async ({ page }) => {
+      // The admin's own row should not have a Delete button
+      const adminName = process.env.ADMIN_USER ?? 'admin'
+      const adminItem = page.locator('.settings-list-item', { hasText: adminName })
+      await expect(adminItem.locator('button:has-text("Delete")')).not.toBeVisible()
+    })
   })
 
   // ── Audit log ─────────────────────────────────────────────────────────────
 
-  test('audit log section is visible for admin', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'Audit Log' })).toBeVisible()
-  })
+  test.describe('Audit log', () => {
+    test.beforeEach(async ({ page }) => { await openTab(page, 'Audit') })
 
-  test('audit log shows entries for recent actions', async ({ page }) => {
-    await page.locator('h3', { hasText: 'Audit Log' }).scrollIntoViewIfNeeded()
-    // We've done several creates/updates in prior tests so there should be entries
-    await expect(page.locator('.audit-log-table')).toBeVisible()
-    const rows = page.locator('.audit-log-table tbody tr')
-    expect(await rows.count()).toBeGreaterThan(0)
+    test('audit log section is visible for admin', async ({ page }) => {
+      await expect(page.locator('h3', { hasText: 'Audit Log' })).toBeVisible()
+    })
+
+    test('audit log shows entries for recent actions', async ({ page }) => {
+      // We've done several creates/updates in prior tests so there should be entries
+      await expect(page.locator('.audit-log-table')).toBeVisible()
+      const rows = page.locator('.audit-log-table tbody tr')
+      expect(await rows.count()).toBeGreaterThan(0)
+    })
   })
 })
