@@ -1,45 +1,36 @@
 # Backlog
 
-Last updated: 2026-06-25 (deep audit — 7 specialist agents + web research)
+Last updated: 2026-06-25 (reconciled against code at v0.23.0 — resolved items removed)
+
+> Many items from the earlier deep audit have since shipped (see CHANGELOG 0.16.0–0.23.0).
+> This list contains only what is **genuinely open**, verified against the current codebase.
 
 ---
 
 ## P1 — Fix immediately
 
-- [ ] **Goroutine storm in FireMonthDigest** — no concurrency cap; one goroutine per user×hook fires on the 1st of every month. Add a semaphore/worker pool. (`backend/webhooks.go:FireMonthDigest`)
-- [ ] **Missing SQLite pragmas** — no `PRAGMA journal_mode=WAL`, `PRAGMA foreign_keys=ON`, `PRAGMA synchronous=NORMAL`. Foreign keys are unenforced at DB level. (`backend/db.go`)
-- [ ] **No UNIQUE constraint on completions(task_id, month)** — concurrent toggle requests can insert duplicate rows. Add DB constraint + idempotent upsert.
-- [ ] **CSRF protection missing** — session cookies are not `SameSite=Strict`; no CSRF tokens on mutating endpoints. Set `SameSite=Strict` on session cookie.
-- [ ] **SSRF DNS rebinding gap** — `safeWebhookClient` resolves then connects in two steps; a rebinding attack can bypass the IP check. Pin the resolved IP at dial time. (`backend/webhooks.go:safeWebhookClient`)
+_None currently open._ All prior P1 items are resolved:
+WAL + `synchronous=NORMAL` + `foreign_keys` pragmas (`db.go`), digest goroutine cap
+(`webhooks.go`), `completions` uniqueness via `PRIMARY KEY (task_id, month)`,
+`SameSite=Strict` cookies (`auth.go`), and SSRF dial-time IP pinning
+(`safeWebhookClient` dials the validated resolved IP, not the hostname).
 
 ## P2 — Next sprint
 
-- [ ] **Webhook retry logic** — transient 5xx drops events silently. Add 3-attempt exponential backoff with jitter in `FireWebhooks` and `FireMonthDigest`.
+- [ ] **Webhook retry logic** — transient 5xx drops events silently. Add 3-attempt exponential backoff with jitter in `FireWebhooks` and `FireMonthDigest`. (`backend/webhooks.go`)
 - [ ] **Context propagation to DB** — no `context.Context` passed to any DB query; cancelled requests keep DB work alive. Use `QueryContext`/`ExecContext` throughout `db.go`.
-- [ ] **Missing index on completions(task_id, month)** — full table scan on every page load. Add composite index. (`backend/db.go`)
-- [ ] **Optimistic toggle debounce** — rapid double-clicks apply the update twice before server responds. Disable control during in-flight request. (`frontend/src/App.jsx`)
-- [ ] **Rate limiting gaps** — `/api/auth/setup`, `PATCH /api/auth/password`, and admin user creation have no rate limiting. Extend existing rate-limiter to cover them. (`backend/auth.go`)
-- [ ] **Content-Security-Policy header** — `securityHeaders` middleware is missing a CSP. Add restrictive policy. (`backend/main.go`)
-- [ ] **Receipt path traversal audit** — confirm download handler strips path components before constructing file path from stored filename. (`backend/handlers.go`)
-- [ ] **CSV import month format not validated** — malformed months (e.g. `2026-1`) inserted directly, causing lookup mismatches. Validate and normalise to `YYYY-MM`. (`backend/handlers.go`)
 - [ ] **Audit log goroutine leak** — `go h.db.InsertAuditLog(...)` in every handler; if DB is locked, goroutines accumulate. Use a bounded fire-and-forget queue. (`backend/handlers.go`)
-- [ ] **User delete doesn't cascade** — deleting a user may leave orphaned tasks/completions/webhooks. Verify or add `ON DELETE CASCADE`. (`backend/db.go`)
 - [ ] **N+1 in FireMonthDigest** — 2 sequential queries per user in a loop (`GetWebhooksForUser` + `GetTasks`). Batch with a single query joining users × hooks. (`backend/webhooks.go`)
+- [ ] **Rate-limit admin user creation** — `Setup` and `ChangePassword` are rate-limited, but admin `POST /api/users` (`CreateUser`) is not. Low risk (admin-only) but worth extending the limiter. (`backend/auth.go`)
 
 ## P3 — Polish / low priority
 
-- [ ] **Audit log pagination** — confirm `ListAuditLogs` uses SQL `LIMIT/OFFSET`, not in-memory slicing.
-- [ ] **`formatAmount` reads locale once on module load** — locale changes mid-session don't reflect until reload. Read from settings context at call time. (`frontend/src/utils.js`)
-- [ ] **ReportView skeleton loader** — blank chart area while loading. Add skeleton/loading state. (`frontend/src/ReportView.jsx`)
-- [ ] **Webhook test only fires first subscribed event** — expand to allow testing any subscribed event or cycle through them. (`backend/webhooks.go:TestWebhook`)
+- [ ] **ReportView skeleton loader** — a text "Loading report…" state exists; replace with a proper skeleton/placeholder chart for less layout shift. (`frontend/src/components/ReportView.jsx`)
+- [ ] **Webhook test only fires first subscribed event** — `TestWebhook` uses `events[0]`; expand to allow testing any subscribed event or cycle through them. (`backend/webhooks.go:TestWebhook`)
 - [ ] **Amount backfill silent on parse error** — if `metadata.amount` is non-numeric, backfill silently skips. Return error or log clearly. (`backend/db.go:UpdateTaskWithAmountBackfill`)
-- [ ] **`writeServerError` may leak schema details** — confirm raw DB errors go to server log only, not response body. (`backend/handlers.go`)
-- [ ] **MCP HTTP client has no SSRF protection** — uses `http.DefaultClient`; should use a safe client if `MONTLY_URL` is ever user-supplied. (`mcp-server/client.go`)
-- [ ] **MCP `create_task` missing `interval` field** — main API supports it but MCP tool doesn't expose it. (`mcp-server/tools.go`)
-- [ ] **MCP tool descriptions are terse** — richer descriptions + parameter examples improve AI assistant usability. (`mcp-server/tools.go`)
+- [ ] **MCP HTTP client has no SSRF protection** — uses a plain `http.Client`; should use a safe client if `MONTLY_URL` is ever user-supplied. (`mcp-server/client.go`)
 - [ ] **No ETag/Last-Modified on GET /api/tasks** — add caching headers to halve round-trips for MCP and other clients.
 - [ ] **No E2E coverage of MCP server** — add integration test that runs the full Docker stack and calls MCP tools end-to-end.
-- [ ] **FireWebhooks body shared across goroutines** — currently safe but fragile; create a fresh `bytes.NewReader` per goroutine. (`backend/webhooks.go:FireWebhooks`)
 
 ---
 

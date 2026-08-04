@@ -21,4 +21,4 @@ data/
 .env
 
 # Test/coverage artifacts
-backend/coverage.out
+backend/*.out
