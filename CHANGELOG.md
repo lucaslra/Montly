@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.24.1] — 2026-08-05
+
+### Fixed
+- **SSO button missing from the login screen after logout** — after signing in via SSO and logging out (or refreshing while logged in, then logging out), the “Sign in with <provider>” button was gone and the screen showed password-only. The available sign-in methods were only fetched when the initial session check failed, so a page that first loaded with an active session (e.g. the OIDC callback) never loaded them. Montly now loads the session, sign-in methods, and setup status unconditionally in parallel on mount. With `DISABLE_PASSWORD_LOGIN=true` this previously produced a login screen offering neither password nor SSO (a full lockout) — also fixed.
+
 ## [0.24.0] — 2026-08-05
 
 ### Added
