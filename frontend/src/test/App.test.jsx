@@ -45,7 +45,9 @@ beforeEach(() => {
   })
   // Reset URL so the App always starts in the monthly view regardless of test order
   window.history.replaceState(null, '', '/')
-  // Default: SSO disabled, password login available (unauth paths call this).
+  // Defaults: setup complete, SSO disabled, password login available. These are
+  // now fetched unconditionally on mount, so provide defaults for every test.
+  api.fetchSetupStatus.mockResolvedValue({ needs_setup: false })
   api.fetchAuthConfig.mockResolvedValue({ password_login: true, oidc: { enabled: false } })
 })
 
@@ -109,6 +111,35 @@ describe('App auth states', () => {
     await userEvent.click(screen.getByRole('button', { name: /Sign out/ }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument())
     expect(api.logout).toHaveBeenCalledOnce()
+  })
+
+  it('loads the available sign-in methods on mount even when authenticated', async () => {
+    // Regression: after an SSO login fetchMe() succeeds, but authConfig must still
+    // be fetched so the login screen is correct after a later logout.
+    await renderAuth()
+    expect(api.fetchAuthConfig).toHaveBeenCalled()
+  })
+
+  it('shows the SSO button on the login screen after logging out of an SSO session', async () => {
+    api.logout.mockResolvedValue(null)
+    api.fetchAuthConfig.mockResolvedValue({ password_login: true, oidc: { enabled: true, provider_name: 'Pocket ID' } })
+    await renderAuth() // authenticated first load (e.g. via the OIDC callback)
+    await userEvent.click(screen.getByRole('button', { name: /Sign out/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Sign in with Pocket ID' })).toBeInTheDocument()
+    )
+  })
+
+  it('shows only the SSO button after logout when password login is disabled', async () => {
+    // Guards against a full lockout: DISABLE_PASSWORD_LOGIN + SSO must still offer SSO.
+    api.logout.mockResolvedValue(null)
+    api.fetchAuthConfig.mockResolvedValue({ password_login: false, oidc: { enabled: true, provider_name: 'Pocket ID' } })
+    await renderAuth()
+    await userEvent.click(screen.getByRole('button', { name: /Sign out/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Sign in with Pocket ID' })).toBeInTheDocument()
+    )
+    expect(screen.queryByLabelText('Username')).not.toBeInTheDocument()
   })
 })
 
