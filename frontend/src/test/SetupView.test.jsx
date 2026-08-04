@@ -6,11 +6,26 @@ import * as api from '../api.js'
 
 vi.mock('../api.js', () => ({
   setupAdmin: vi.fn(),
+  OIDC_LOGIN_URL: '/api/auth/oidc/login',
 }))
 
 describe('SetupView', () => {
   beforeEach(() => vi.clearAllMocks())
   afterEach(() => vi.clearAllMocks())
+
+  it('offers SSO bootstrap when OIDC is enabled', () => {
+    render(<SetupView onComplete={vi.fn()} authConfig={{ password_login: true, oidc: { enabled: true, provider_name: 'Authentik' } }} />)
+    const link = screen.getByRole('link', { name: 'Sign in with Authentik' })
+    expect(link).toHaveAttribute('href', '/api/auth/oidc/login')
+    // Password setup still available alongside SSO.
+    expect(screen.getByLabelText('Username')).toBeInTheDocument()
+  })
+
+  it('hides the password setup form when password login is disabled', () => {
+    render(<SetupView onComplete={vi.fn()} authConfig={{ password_login: false, oidc: { enabled: true, provider_name: 'SSO' } }} />)
+    expect(screen.getByRole('link', { name: 'Sign in with SSO' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Username')).not.toBeInTheDocument()
+  })
 
   // ── Rendering ──────────────────────────────────────────────────────────────
 

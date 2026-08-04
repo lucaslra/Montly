@@ -1464,6 +1464,32 @@ body {
   margin-top: 4px;
 }
 
+/* SSO button — full-width anchor styled like the primary button */
+.sso-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  text-align: center;
+}
+
+/* "or" divider between SSO and password sign-in */
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 /* ── Logout button ───────────────────────────────── */
 .logout-btn {
   background: var(--surface);

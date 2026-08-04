@@ -7,6 +7,8 @@ import * as api from '../api.js'
 vi.mock('../api.js', () => ({
   fetchMe:                  vi.fn(),
   fetchSetupStatus:         vi.fn(),
+  fetchAuthConfig:          vi.fn(),
+  OIDC_LOGIN_URL:           '/api/auth/oidc/login',
   fetchSettings:            vi.fn(),
   fetchTasks:               vi.fn(),
   fetchCompletions:         vi.fn(),
@@ -43,6 +45,8 @@ beforeEach(() => {
   })
   // Reset URL so the App always starts in the monthly view regardless of test order
   window.history.replaceState(null, '', '/')
+  // Default: SSO disabled, password login available (unauth paths call this).
+  api.fetchAuthConfig.mockResolvedValue({ password_login: true, oidc: { enabled: false } })
 })
 
 afterEach(() => vi.clearAllMocks())
