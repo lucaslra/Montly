@@ -107,6 +107,9 @@ type User struct {
 	PasswordHash string `json:"-"` // never serialized
 	IsAdmin      bool   `json:"is_admin"`
 	CreatedAt    string `json:"created_at"`
+	Email        string `json:"email,omitempty"`
+	OIDCIssuer   string `json:"-"` // set for SSO-linked accounts
+	OIDCSubject  string `json:"-"` // stable per-user id from the IdP
 }
 
 type APIToken struct {
@@ -253,6 +256,10 @@ func migratePostgres(db *sql.DB) error {
 			PRIMARY KEY (task_id, user_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_shares_user_id ON task_shares(user_id)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS email        TEXT`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS oidc_issuer  TEXT`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS oidc_subject TEXT`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc ON users(oidc_issuer, oidc_subject) WHERE oidc_subject IS NOT NULL`,
 	}
 	for _, s := range statements {
 		if _, err := db.Exec(s); err != nil {
@@ -334,6 +341,9 @@ func migrate(db *sql.DB) error {
 		{"completions.amount", `ALTER TABLE completions ADD COLUMN amount       TEXT    NOT NULL DEFAULT ''`},
 		{"completions.note", `ALTER TABLE completions ADD COLUMN note         TEXT    NOT NULL DEFAULT ''`},
 		{"completions.skipped", `ALTER TABLE completions ADD COLUMN skipped      INTEGER NOT NULL DEFAULT 0`},
+		{"users.email", `ALTER TABLE users ADD COLUMN email        TEXT`},
+		{"users.oidc_issuer", `ALTER TABLE users ADD COLUMN oidc_issuer  TEXT`},
+		{"users.oidc_subject", `ALTER TABLE users ADD COLUMN oidc_subject TEXT`},
 	} {
 		if _, err := db.Exec(s.stmt); err != nil {
 			msg := err.Error()
@@ -436,6 +446,8 @@ func migrate(db *sql.DB) error {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_webhooks_user_id ON webhooks(user_id)`)
+	// Unique per-provider identity for SSO-linked accounts (partial: only when linked).
+	db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc ON users(oidc_issuer, oidc_subject) WHERE oidc_subject IS NOT NULL`)
 
 	// Backfill amount from metadata JSON for existing rows.
 	if res, err := db.Exec(`UPDATE tasks SET amount = COALESCE(json_extract(metadata, '$.amount'), '') WHERE amount = ''`); err == nil {
@@ -1451,6 +1463,116 @@ func (db *DB) UpdateUserPassword(userID int64, newHash string) error {
 // Called once after the first admin is created.
 func (db *DB) AssignOrphanedTasks(adminID int64) error {
 	_, err := db.Exec(db.q(`UPDATE tasks SET user_id = ? WHERE user_id IS NULL`), adminID)
+	return err
+}
+
+// ======== OIDC identity ========
+
+const oidcUserColumns = `id, username, password_hash, is_admin, created_at, email, oidc_issuer, oidc_subject`
+
+func scanOIDCUser(row *sql.Row) (User, bool, error) {
+	var u User
+	var isAdminInt int64
+	var email, issuer, subject *string
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &isAdminInt, &u.CreatedAt, &email, &issuer, &subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, false, nil
+	}
+	if err != nil {
+		return User{}, false, err
+	}
+	u.IsAdmin = isAdminInt != 0
+	if email != nil {
+		u.Email = *email
+	}
+	if issuer != nil {
+		u.OIDCIssuer = *issuer
+	}
+	if subject != nil {
+		u.OIDCSubject = *subject
+	}
+	return u, true, nil
+}
+
+// GetUserByOIDC returns the user linked to the given (issuer, subject) pair, if any.
+func (db *DB) GetUserByOIDC(issuer, subject string) (User, bool, error) {
+	return scanOIDCUser(db.QueryRow(
+		db.q(`SELECT `+oidcUserColumns+` FROM users WHERE oidc_issuer = ? AND oidc_subject = ?`),
+		issuer, subject,
+	))
+}
+
+// GetUserByEmail returns the (lowest-id) user with the given non-empty email, if any.
+// Used for account linking; callers must ensure email is non-empty.
+func (db *DB) GetUserByEmail(email string) (User, bool, error) {
+	return scanOIDCUser(db.QueryRow(
+		db.q(`SELECT `+oidcUserColumns+` FROM users WHERE email = ? ORDER BY id ASC LIMIT 1`),
+		email,
+	))
+}
+
+// GetUserByUsernameFull returns the user with the given username plus OIDC/email fields.
+func (db *DB) GetUserByUsernameFull(username string) (User, bool, error) {
+	return scanOIDCUser(db.QueryRow(
+		db.q(`SELECT `+oidcUserColumns+` FROM users WHERE username = ?`),
+		username,
+	))
+}
+
+// LinkOIDCIdentity stamps an (issuer, subject) pair onto an existing user, and
+// records the email when provided (never wipes an existing email).
+func (db *DB) LinkOIDCIdentity(userID int64, issuer, subject, email string) error {
+	if email != "" {
+		_, err := db.Exec(db.q(`UPDATE users SET oidc_issuer = ?, oidc_subject = ?, email = ? WHERE id = ?`), issuer, subject, email, userID)
+		return err
+	}
+	_, err := db.Exec(db.q(`UPDATE users SET oidc_issuer = ?, oidc_subject = ? WHERE id = ?`), issuer, subject, userID)
+	return err
+}
+
+// CreateOIDCUser provisions a new SSO-only user (empty password hash — password
+// login is impossible until one is set).
+func (db *DB) CreateOIDCUser(username, email, issuer, subject string, isAdmin bool) (User, error) {
+	isAdminInt := 0
+	if isAdmin {
+		isAdminInt = 1
+	}
+	var emailPtr *string
+	if email != "" {
+		emailPtr = &email
+	}
+	var id int64
+	if db.driver == "postgres" {
+		err := db.QueryRow(
+			db.q(`INSERT INTO users (username, password_hash, is_admin, email, oidc_issuer, oidc_subject) VALUES (?, '', ?, ?, ?, ?) RETURNING id`),
+			username, isAdminInt, emailPtr, issuer, subject,
+		).Scan(&id)
+		if err != nil {
+			return User{}, err
+		}
+	} else {
+		res, err := db.Exec(
+			db.q(`INSERT INTO users (username, password_hash, is_admin, email, oidc_issuer, oidc_subject) VALUES (?, '', ?, ?, ?, ?)`),
+			username, isAdminInt, emailPtr, issuer, subject,
+		)
+		if err != nil {
+			return User{}, err
+		}
+		id, err = res.LastInsertId()
+		if err != nil {
+			return User{}, err
+		}
+	}
+	return db.GetUserByID(id)
+}
+
+// SetUserAdmin updates a user's admin flag (used to sync from an IdP group claim).
+func (db *DB) SetUserAdmin(userID int64, isAdmin bool) error {
+	v := 0
+	if isAdmin {
+		v = 1
+	}
+	_, err := db.Exec(db.q(`UPDATE users SET is_admin = ? WHERE id = ?`), v, userID)
 	return err
 }
 

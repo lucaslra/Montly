@@ -29,6 +29,8 @@ Open `http://localhost:8080` — on first access you'll be prompted to create th
 | `DB_TYPE`          | `sqlite`     | `sqlite` or `postgres` |
 | `DATABASE_URL`     | *(required for postgres)* | Full Postgres connection string |
 | `TRUST_PROXY_HEADERS` | `false`   | Set `true` when behind a trusted reverse proxy that sets `X-Forwarded-For`. Required for accurate IP-based rate limiting. **Do not enable** unless a proxy you control is stripping or overwriting this header. |
+| `OIDC_ISSUER`      | *(unset)*    | OpenID Connect issuer URL. Setting this enables "Sign in with SSO". See [OpenID Connect (SSO)](#openid-connect-sso) below. |
+| `DISABLE_PASSWORD_LOGIN` | `false` | When `true` **and** OIDC is configured, hides the password form and rejects password logins (SSO-only). Ignored when OIDC is not configured. |
 
 ---
 
@@ -226,6 +228,74 @@ The MCP server lets AI assistants (Claude Desktop, Cursor, etc.) interact with y
 > **Security:** The MCP HTTP transport has no authentication beyond the baked-in API token. Always bind to `127.0.0.1` or place it behind an authenticated reverse proxy. Do **not** expose the MCP port to the public internet.
 
 For local/stdio usage with Claude Desktop, see [`mcp-server/README.md`](../mcp-server/README.md).
+
+---
+
+## OpenID Connect (SSO)
+
+Montly can delegate authentication to any standards-compliant OpenID Connect
+provider (Keycloak, Authentik, Auth0, Okta, Google, Microsoft Entra ID, …). SSO
+runs **alongside** password login by default — once a user is authenticated via
+the provider, Montly issues its normal session cookie, so API tokens and every
+other feature work unchanged.
+
+### Environment variables
+
+| Variable                | Default              | Description |
+|-------------------------|----------------------|-------------|
+| `OIDC_ISSUER`           | *(required to enable)* | Issuer URL serving `/.well-known/openid-configuration` |
+| `OIDC_CLIENT_ID`        | *(required)*         | OAuth2 client ID registered with the provider |
+| `OIDC_CLIENT_SECRET`    | *(required)*         | OAuth2 client secret |
+| `OIDC_REDIRECT_URL`     | *(required)*         | Must be `https://<your-host>/api/auth/oidc/callback` |
+| `OIDC_PROVIDER_NAME`    | `SSO`                | Label shown on the sign-in button |
+| `OIDC_SCOPES`           | `openid profile email` | Space/comma-separated scopes (`openid` is always added) |
+| `OIDC_USERNAME_CLAIM`   | `preferred_username` | ID-token claim used to derive the Montly username |
+| `OIDC_GROUPS_CLAIM`     | `groups`             | Claim holding the user's group memberships |
+| `OIDC_ADMIN_GROUP`      | *(unset)*            | If set, membership grants admin — **synced on every login** |
+| `OIDC_ALLOW_SIGNUP`     | `true`               | Auto-create a Montly account on first SSO login |
+| `OIDC_LINK_BY_EMAIL`    | `true`               | Link SSO identity to an existing account by **verified** email |
+| `OIDC_LINK_BY_USERNAME` | `true`               | Link SSO identity to an existing account by username |
+
+### How accounts are resolved
+
+On each SSO login Montly maps the verified ID token to an account in this order:
+
+1. **Already linked** — an account previously linked to this provider `sub`.
+2. **Link by verified email** — if `OIDC_LINK_BY_EMAIL=true`, the token carries
+   `email_verified: true`, and a local account has that email.
+3. **Link by username** — if `OIDC_LINK_BY_USERNAME=true` and a local account's
+   username matches the token's username claim.
+4. **Just-in-time provisioning** — if `OIDC_ALLOW_SIGNUP=true`, a new SSO-only
+   account is created (username taken from the claim, deduplicated on collision).
+
+The **first-ever** user created via SSO is always made admin, so you can bootstrap
+a fresh instance without a password admin. When `OIDC_ADMIN_GROUP` is set, admin
+status is kept in sync with group membership on every login.
+
+> **Linking trust model:** email/username linking trusts your IdP's namespace.
+> Only enable it for a provider you control. Email linking additionally requires
+> `email_verified: true`. To disable auto-linking entirely, set both
+> `OIDC_LINK_BY_EMAIL=false` and `OIDC_LINK_BY_USERNAME=false`.
+
+### Example: Keycloak
+
+Register a confidential client with redirect URI
+`https://montly.example.com/api/auth/oidc/callback`, then:
+
+```yaml
+    environment:
+      OIDC_ISSUER: "https://keycloak.example.com/realms/main"
+      OIDC_CLIENT_ID: "montly"
+      OIDC_CLIENT_SECRET: "<client-secret>"
+      OIDC_REDIRECT_URL: "https://montly.example.com/api/auth/oidc/callback"
+      OIDC_PROVIDER_NAME: "Keycloak"
+      OIDC_ADMIN_GROUP: "montly-admins"
+      SECURE_COOKIES: "true"
+```
+
+> The flow uses the authorization-code grant with PKCE, a signed state cookie for
+> CSRF protection, and nonce validation. `SECURE_COOKIES=true` (HTTPS) is strongly
+> recommended in production.
 
 ---
 

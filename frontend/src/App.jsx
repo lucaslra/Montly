@@ -12,7 +12,7 @@ import {
   toggleCompletion, skipCompletion, createTask, updateTask, deleteTask,
   archiveTask, unarchiveTask,
   uploadCompletionReceipt, deleteCompletionReceipt, patchCompletion,
-  fetchMe, logout, fetchSetupStatus,
+  fetchMe, logout, fetchSetupStatus, fetchAuthConfig,
 } from './api.js'
 import './styles/main.css'
 import { formatAmount } from './utils.js'
@@ -99,16 +99,21 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [needsSetup, setNeedsSetup] = useState(false)
+  const [authConfig, setAuthConfig] = useState(null)
 
-  // Check existing session on mount; if not authenticated, check first-run setup.
+  // Check existing session on mount; if not authenticated, load first-run setup
+  // status and the available sign-in methods (password / SSO).
   useEffect(() => {
     fetchMe()
       .then(u => { setUser(u); setAuthChecked(true) })
       .catch(() => {
-        fetchSetupStatus()
-          .then(s => setNeedsSetup(s.needs_setup === true))
-          .catch(() => {})
-          .finally(() => { setUser(false); setAuthChecked(true) })
+        Promise.all([
+          fetchSetupStatus().catch(() => ({ needs_setup: false })),
+          fetchAuthConfig().catch(() => null),
+        ]).then(([s, cfg]) => {
+          setNeedsSetup(s.needs_setup === true)
+          setAuthConfig(cfg)
+        }).finally(() => { setUser(false); setAuthChecked(true) })
       })
   }, [])
 
@@ -407,8 +412,8 @@ export default function App() {
   }, [tasks, completionMap, settings.task_sort, settings.completed_last])
 
   if (!authChecked) return <div className="loading">Loading…</div>
-  if (!user && needsSetup) return <SetupView onComplete={u => { setNeedsSetup(false); setUser(u) }} />
-  if (!user) return <LoginView onLogin={u => setUser(u)} />
+  if (!user && needsSetup) return <SetupView onComplete={u => { setNeedsSetup(false); setUser(u) }} authConfig={authConfig} />
+  if (!user) return <LoginView onLogin={u => setUser(u)} authConfig={authConfig} />
 
   const currentMonth = getCurrentMonth()
 

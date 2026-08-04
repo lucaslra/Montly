@@ -201,14 +201,21 @@ func currentUser(r *http.Request) sessionClaims {
 // ---------- auth handlers ----------
 
 type AuthHandler struct {
-	db          *DB
-	secret      []byte
-	secure      bool
-	trustProxy  bool
-	rl          *RateLimiter
+	db               *DB
+	secret           []byte
+	secure           bool
+	trustProxy       bool
+	rl               *RateLimiter
+	oidc             OIDCProvider // nil when SSO disabled
+	oidcCfg          *OIDCConfig  // nil when SSO disabled
+	passwordDisabled bool         // DISABLE_PASSWORD_LOGIN (only honored when SSO is enabled)
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if h.passwordDisabled {
+		writeError(w, "password login is disabled; use single sign-on", http.StatusForbidden)
+		return
+	}
 	ip := clientIP(r, h.trustProxy)
 	if !h.rl.allow(ip) {
 		writeError(w, "too many failed attempts — try again later", http.StatusTooManyRequests)

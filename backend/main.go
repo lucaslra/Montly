@@ -163,7 +163,28 @@ func main() {
 	safeClient := safeWebhookClient()
 	h  := &Handler{db: db, receiptsDir: receiptsDir, client: safeClient}
 	rl := newRateLimiter(ctx)
-	ah := &AuthHandler{db: db, secret: secret, secure: secureCookies, trustProxy: trustProxy, rl: rl}
+
+	// ── OIDC / SSO (optional; enabled when OIDC_ISSUER is set) ─────────────────
+	oidcCfg := loadOIDCConfig()
+	var oidcProvider OIDCProvider
+	if oidcCfg != nil {
+		if err := oidcCfg.Validate(); err != nil {
+			log.Fatalf("oidc config: %v", err)
+		}
+		provider, err := newRealOIDCProvider(ctx, *oidcCfg)
+		if err != nil {
+			log.Fatalf("oidc init: %v", err)
+		}
+		oidcProvider = provider
+		log.Printf("OIDC enabled (issuer=%s, provider=%q, signup=%v)", oidcCfg.Issuer, oidcCfg.ProviderName, oidcCfg.AllowSignup)
+	}
+	passwordDisabled := os.Getenv("DISABLE_PASSWORD_LOGIN") == "true"
+	if passwordDisabled && oidcProvider == nil {
+		log.Println("WARNING: DISABLE_PASSWORD_LOGIN is set but OIDC is not configured — ignoring to avoid locking everyone out.")
+		passwordDisabled = false
+	}
+
+	ah := &AuthHandler{db: db, secret: secret, secure: secureCookies, trustProxy: trustProxy, rl: rl, oidc: oidcProvider, oidcCfg: oidcCfg, passwordDisabled: passwordDisabled}
 	uh := &UserHandler{db: db}
 	th := &TokenHandler{db: db}
 	wh := &WebhookHandler{db: db, client: safeClient, digestSecret: digestSecret}
@@ -182,11 +203,14 @@ func main() {
 			})
 		})
 
-		// Public: setup check, login, logout
+		// Public: config, setup check, login, logout, SSO
+		r.Get("/auth/config", ah.AuthConfig)
 		r.Get("/auth/setup", ah.SetupStatus)
 		r.Post("/auth/setup", ah.Setup)
 		r.Post("/auth/login", ah.Login)
 		r.Post("/auth/logout", ah.Logout)
+		r.Get("/auth/oidc/login", ah.OIDCLogin)
+		r.Get("/auth/oidc/callback", ah.OIDCCallback)
 
 		// Protected
 		r.Group(func(r chi.Router) {

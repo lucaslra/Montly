@@ -34,6 +34,7 @@ Self-hosted monthly recurring task tracker. Track bills, subscriptions, payments
 - **Audit log** — append-only record of all completions, edits, deletes, user management, and token actions (admin only)
 - **CSV import & export** — bulk-export all completions; import from the same format to migrate or load historical data
 - **Multi-user** — per-user tasks, completions, and settings; admin can create/delete accounts; tasks can be shared across users
+- **OpenID Connect (SSO)** — optional "Sign in with SSO" via any OIDC provider (Keycloak, Authentik, Auth0, Okta, Google, Entra ID); auth-code + PKCE, just-in-time provisioning, account linking, and admin-group mapping — coexists with password login; see [docs/deployment.md](docs/deployment.md#openid-connect-sso)
 - **First-run setup** — create the admin account through the UI on first access; no env vars needed
 - **API tokens** — headless / mobile client access via `Bearer mt_…` tokens
 - **Settings** — per-user currency symbol, date format, color mode (light/dark/system), task sort order, completed-task position, fiscal year start month, number format (1,234.56 or 1.234,56)
@@ -127,8 +128,11 @@ All endpoints live under `/api` and `/api/v1` (both are equivalent). Authenticat
 ```
 POST   /api/auth/login
 POST   /api/auth/logout
+GET    /api/auth/config                          — {"password_login":bool,"oidc":{...}}, public
 GET    /api/auth/setup                           — {"needs_setup": bool}, public
 POST   /api/auth/setup                           — create first admin + open session
+GET    /api/auth/oidc/login                      — start SSO flow (browser redirect), public
+GET    /api/auth/oidc/callback                   — SSO redirect target, public
 GET    /api/auth/me
 PATCH  /api/auth/password
 
