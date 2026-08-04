@@ -38,7 +38,7 @@
   <section class="hero">
     <div class="hero-inner">
       <div class="hero-text">
-        <a href="https://git.nlga.me/lucaslra/Montly/releases/tag/v0.17.0" class="version-badge">v0.17.0</a>
+        <a href="https://git.nlga.me/lucaslra/Montly/releases/tag/v0.24.0" class="version-badge">v0.24.0</a>
         <h1>Never miss a payment or subscription again.</h1>
         <p class="hero-sub">
           Montly tracks bills, subscriptions, payments, and reminders — month by month, automatically.
@@ -92,9 +92,19 @@
           <p>Share individual tasks with other users. Collaborators see the task in their monthly view with a "shared by" badge and can toggle, skip, and attach receipts. Completions are shared state visible to all collaborators.</p>
         </div>
         <div class="feature-card">
+          <div class="feature-icon">&#128273;</div>
+          <h3>Single sign-on (OIDC)</h3>
+          <p>Optional &ldquo;Sign in with SSO&rdquo; via any OpenID Connect provider &mdash; Keycloak, Authentik, Auth0, Okta, Google, Entra ID. Authorization-code flow with PKCE, just-in-time provisioning, account linking, and admin-group mapping. Coexists with password login.</p>
+        </div>
+        <div class="feature-card">
           <div class="feature-icon">&#128274;</div>
           <h3>API tokens &amp; webhooks</h3>
           <p>Headless access via <code>Bearer mt_…</code> tokens. Outbound webhooks on task completion, uncompletion, skip, and monthly digest. Test webhooks directly from the Settings panel.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#129302;</div>
+          <h3>AI assistant (MCP)</h3>
+          <p>Optional MCP server exposes Montly as tools for AI assistants (Claude Desktop, Cursor, …) — list tasks, mark done, skip, set amounts paid, create tasks, and pull spending reports.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">&#128296;</div>
