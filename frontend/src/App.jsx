@@ -101,20 +101,22 @@ export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false)
   const [authConfig, setAuthConfig] = useState(null)
 
-  // Check existing session on mount; if not authenticated, load first-run setup
-  // status and the available sign-in methods (password / SSO).
+  // On mount, check the session AND load the available sign-in methods + first-run
+  // setup status unconditionally, in parallel. The sign-in methods (authConfig)
+  // must be loaded even when the session check succeeds (e.g. the page first loaded
+  // via the OIDC callback with an active session) so the login screen still shows
+  // the SSO button after a later logout.
   useEffect(() => {
-    fetchMe()
-      .then(u => { setUser(u); setAuthChecked(true) })
-      .catch(() => {
-        Promise.all([
-          fetchSetupStatus().catch(() => ({ needs_setup: false })),
-          fetchAuthConfig().catch(() => null),
-        ]).then(([s, cfg]) => {
-          setNeedsSetup(s.needs_setup === true)
-          setAuthConfig(cfg)
-        }).finally(() => { setUser(false); setAuthChecked(true) })
-      })
+    Promise.all([
+      fetchMe().catch(() => false),
+      fetchAuthConfig().catch(() => null),
+      fetchSetupStatus().catch(() => ({ needs_setup: false })),
+    ]).then(([u, cfg, s]) => {
+      setUser(u)
+      setAuthConfig(cfg)
+      setNeedsSetup(s.needs_setup === true)
+      setAuthChecked(true)
+    })
   }, [])
 
   const onApiError = useCallback((e) => {

@@ -36,6 +36,19 @@ test.describe('OIDC / SSO', () => {
     await expect(page.locator('.login-card')).toHaveCount(0)
   })
 
+  test('logging out of an SSO session returns to a login screen that still offers SSO', async ({ page }) => {
+    // Regression: after an SSO login the initial page load is authenticated, so the
+    // sign-in methods must still be loaded — otherwise logout showed a password-only
+    // (or empty) login screen with no SSO button.
+    await page.goto('/')
+    await page.getByRole('link', { name: 'Sign in with Mock SSO' }).click()
+    await expect(page.locator('.app-header')).toBeVisible({ timeout: 20000 })
+
+    await page.click('button.logout-btn')
+    await expect(page.locator('.login-card')).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Sign in with Mock SSO' })).toBeVisible()
+  })
+
   test('callback with a missing state shows a friendly error on the login page', async ({ page }) => {
     // Hitting the callback without the signed state cookie must not sign the user in.
     await page.goto('/api/auth/oidc/callback?state=forged&code=abc')
