@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.24.0] — 2026-08-05
+
+### Added
+- **OpenID Connect (SSO)** — optional single sign-on via any standards-compliant OIDC provider (Keycloak, Authentik, Auth0, Okta, Google, Entra ID), enabled by setting `OIDC_ISSUER`. Authorization-code flow with PKCE, an HMAC-signed state cookie (CSRF state + nonce + PKCE verifier), and ID-token verification via JWKS. New public endpoints: `GET /api/auth/config`, `GET /api/auth/oidc/login`, `GET /api/auth/oidc/callback`. SSO coexists with password login by default; `DISABLE_PASSWORD_LOGIN` makes it SSO-only.
+- **SSO account handling** — just-in-time provisioning (the first SSO user is bootstrapped as admin), account linking by verified email then username, and admin-group mapping synced on every login via `OIDC_ADMIN_GROUP`. Tunable with `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `OIDC_SCOPES`, `OIDC_PROVIDER_NAME`, `OIDC_USERNAME_CLAIM`, `OIDC_GROUPS_CLAIM`, `OIDC_ALLOW_SIGNUP`, `OIDC_LINK_BY_EMAIL`, `OIDC_LINK_BY_USERNAME`.
+- **SSO sign-in UI** — the login and first-run setup screens render a “Sign in with <provider>” button when SSO is enabled; callback failures surface as friendly messages.
+
+### Changed
+- **Schema** — `users` gains nullable `email`, `oidc_issuer`, and `oidc_subject` columns plus a partial unique index on the OIDC identity (idempotent SQLite + PostgreSQL migrations).
+
+### Tests
+- **OIDC coverage** — 24 backend unit tests (config parsing/validation, signed state-cookie roundtrip, claim extraction, `resolveOIDCUser` linking/JIT/admin-sync, and the login/callback/config handlers via a fake provider) and 6 frontend UI tests. New E2E suite `06-oidc.spec.ts` (4 tests) drives the full flow against a zero-dependency mock OIDC provider added to the E2E stack.
+- **E2E repair** — updated the settings/tasks/sharing specs for the tabbed Settings view and archive-first deletion (three pre-existing failures); the suite is green again at 90 tests across 6 files.
+
+### Docs
+- OIDC deployment guide (`docs/deployment.md#openid-connect-sso`), `.env.example`, README, and the project website refreshed for SSO; `BACKLOG.md` reconciled against shipped work.
+
 ## [0.23.0] — 2026-06-25
 
 ### Fixed
