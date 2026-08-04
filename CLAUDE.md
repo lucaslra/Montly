@@ -83,13 +83,15 @@ On a fresh install with no users in the DB, the app serves a registration form (
   - `client_test.go` — auth header, URL construction, error handling, constructor defaults, POST/PATCH methods, month encoding/validation
   - `tools_test.go` — list_tasks (pending/mixed/override/receipt/shared/note/empty/default-month/invalid-month/API-errors), get_report (summary/skipped-exclusion/API-error), toggle_task (complete/uncomplete/default-month/missing-id/invalid-month/API-error), skip_task (skip/unskip/missing-id/API-error), update_completion (amount/note/missing-fields/missing-id/API-error), create_task (payload/title-required/date-validation/empty-fields/API-error), resolveMonth
   - `main_test.go` — server creation
-- **E2E:** `make e2e` — Playwright 1.52 against the full Docker stack; 86 tests across 5 suites:
+- **E2E:** `make e2e` — Playwright 1.52 against the full Docker stack; 90 tests across 6 suites:
   - `01-auth.spec.ts` — setup flow, login/logout, protected routes, token auth
   - `02-tasks.spec.ts` — create, edit, delete, search, CSV import
   - `03-completions.spec.ts` — toggle, amount editing, receipt attach/remove, notes, skip, cross-month isolation
   - `04-settings.spec.ts` — preferences, password change, API tokens, webhooks, user management, audit log
   - `05-sharing.spec.ts` — shared task lists, collaborator add/remove, archive flows
+  - `06-oidc.spec.ts` — SSO button, full auth-code+PKCE flow sign-in, session persistence, callback error handling; the E2E stack adds a `mock-oidc` service (`e2e/mock-oidc/server.mjs` — a zero-dependency Node mock IdP: discovery, JWKS, /authorize, RS256 /token) and wires the app to it via `OIDC_*` env in `docker-compose.e2e.yml`. Both the app and the Playwright browser share the Docker network, so one issuer hostname (`mock-oidc:9000`) works for both
   - `e2e/global-setup.ts` runs once to create the admin account and persist the session; `e2e/fixtures/` holds runtime-generated test files (gitignored)
+  - Note: three specs (`02-tasks` delete-reminder, `04-settings` change-password-present, `05-sharing` create-sharee) fail on `main` too — pre-existing, unrelated to OIDC
 
 ## Available agents
 Use these for focused reviews (invoke via subagent):
