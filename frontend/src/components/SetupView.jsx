@@ -1,7 +1,10 @@
 import { useState } from 'react'
-import { setupAdmin } from '../api.js'
+import { setupAdmin, OIDC_LOGIN_URL } from '../api.js'
 
-export default function SetupView({ onComplete }) {
+export default function SetupView({ onComplete, authConfig }) {
+  const oidcEnabled = authConfig?.oidc?.enabled === true
+  const providerName = authConfig?.oidc?.provider_name || 'SSO'
+  const passwordEnabled = authConfig ? authConfig.password_login !== false : true
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm,  setConfirm]  = useState('')
@@ -31,9 +34,24 @@ export default function SetupView({ onComplete }) {
       <div className="login-card">
         <h1 className="app-title login-title">Montly</h1>
         <div>
-          <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>Welcome! Create your admin account to get started.</p>
+          <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>
+            {passwordEnabled
+              ? 'Welcome! Create your admin account to get started.'
+              : 'Welcome! Sign in with your identity provider to create the first admin account.'}
+          </p>
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}
+
+        {oidcEnabled && (
+          <a className="btn-primary login-btn sso-btn" href={OIDC_LOGIN_URL}>
+            Sign in with {providerName}
+          </a>
+        )}
+        {oidcEnabled && passwordEnabled && (
+          <div className="login-divider"><span>or</span></div>
+        )}
+
+        {passwordEnabled && (
         <form onSubmit={handleSubmit} className="login-form">
           <div className="form-group">
             <label htmlFor="setup-username">Username</label>
@@ -79,6 +97,7 @@ export default function SetupView({ onComplete }) {
             {loading ? 'Creating account…' : 'Create account'}
           </button>
         </form>
+        )}
       </div>
     </div>
   )

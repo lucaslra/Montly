@@ -17,7 +17,8 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 
 ## Key conventions
 - All SQLite queries and migrations live in `backend/db.go`; migrations use idempotent ALTER TABLE; includes `task_shares` join table for per-task collaborators
-- All HTTP handlers in `backend/handlers.go` (tasks, completions, settings, receipts, CSV export); auth + token + setup + user handlers live in `backend/auth.go`; webhook handlers in `backend/webhooks.go`
+- All HTTP handlers in `backend/handlers.go` (tasks, completions, settings, receipts, CSV export); auth + token + setup + user handlers live in `backend/auth.go`; webhook handlers in `backend/webhooks.go`; OpenID Connect (SSO) config, provider, and handlers live in `backend/oidc.go`
+- OIDC is optional (enabled when `OIDC_ISSUER` is set) and layers on top of the existing session: after the auth-code+PKCE flow completes, the callback calls the same `setSession()` as password login, so downstream auth is unchanged. Handlers depend on an `OIDCProvider` interface (real impl wraps `coreos/go-oidc`) so they unit-test against a fake IdP. State/nonce/PKCE-verifier ride in a short-lived HMAC-signed `_montly_oidc` cookie (SameSite=Lax). User resolution order: linked `sub` → verified-email link → username link → JIT provision; first-ever SSO user is admin; `OIDC_ADMIN_GROUP` syncs admin on every login. `users` gained nullable `email`/`oidc_issuer`/`oidc_subject` columns + a partial unique index
 - Webhook delivery uses `safeWebhookClient()` which resolves DNS and rejects private/loopback/link-local IPs (covers cloud metadata endpoints like 169.254.169.254) before connecting; redirects are re-validated at each hop and capped at 3
 - Task access uses two helpers: `taskOwnerCheck` (owner-only actions like edit/archive/share management) and `taskAccessCheck` (owner OR shared user — used for completions, receipt upload/delete, skip)
 - Frontend API calls are centralized in `frontend/src/api.js`
@@ -32,11 +33,14 @@ Self-hosted monthly recurring task tracker. Go+Chi+SQLite backend, React+Vite fr
 - MCP tools: `list_tasks` (read tasks+completions for a month), `get_report` (6-month history + 3-month forecast), `toggle_task` (mark done/undo), `skip_task` (skip/unskip), `update_completion` (set paid amount or note), `create_task` (create recurring task)
 
 ## First-run setup
-On a fresh install with no users in the DB, the app serves a registration form (`SetupView.jsx`) instead of the login screen. The admin account is created via `POST /api/auth/setup`. `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars are still supported for automated/headless deployments but are no longer required. Passwords must be 8–72 characters (bcrypt truncates silently at 72).
+On a fresh install with no users in the DB, the app serves a registration form (`SetupView.jsx`) instead of the login screen. The admin account is created via `POST /api/auth/setup`. `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars are still supported for automated/headless deployments but are no longer required. Passwords must be 8–72 characters (bcrypt truncates silently at 72). When OIDC is enabled, `SetupView.jsx` and `LoginView.jsx` also render a "Sign in with SSO" button (fed by `GET /api/auth/config`), and the first SSO user bootstraps as admin.
 
 ## Key API endpoints
+- `GET  /api/auth/config` — `{"password_login":bool,"oidc":{"enabled":bool,"provider_name":str}}`, public
 - `GET  /api/auth/setup` — `{"needs_setup": bool}`, public, no auth required
 - `POST /api/auth/setup` — create first admin + open session; 409 if already set up
+- `GET  /api/auth/oidc/login` — start the OIDC auth-code flow (302 to IdP), public
+- `GET  /api/auth/oidc/callback` — OIDC redirect target; verifies state/nonce, links/provisions user, opens session, 302 to `/` (errors 302 to `/?auth_error=`), public
 - `POST /api/auth/login` / `POST /api/auth/logout`
 - `GET  /api/auth/me` — current user info
 - `PATCH /api/auth/password` — change own password
@@ -62,6 +66,7 @@ On a fresh install with no users in the DB, the app serves a registration form (
 - **Backend:** `cd backend && go test ./...` — covers auth, DB scoping, migrations, tokens, webhooks, archive/unarchive, skip, receipt upload/delete, task shares, shared-task access, webhook actor logic; test files:
   - `db_test.go` — DB-layer unit tests: task CRUD, archive lifecycle, audit log pagination, share CRUD, shared-task visibility, user lookup
   - `handlers_test.go` — HTTP handler integration tests: all endpoints exercised via in-memory router + SQLite
+  - `oidc_test.go` — OIDC unit tests: config parsing/validation, signed state-cookie roundtrip/tamper/expiry, claim extraction, `resolveOIDCUser` (JIT first-user-admin, link by verified email/username, unverified-email guard, username dedupe, signup disabled, admin-group sync), and the login/callback/config handlers via a fake `OIDCProvider`
 - **Frontend:** `cd frontend && npm test` — Vitest + jsdom + Testing Library; tests live in `frontend/src/test/`
   - `App.test.jsx` — auth state machine, month nav, optimistic toggle, toasts, error handling
   - `TaskForm.test.jsx` — form rendering, validation, submit, cancel

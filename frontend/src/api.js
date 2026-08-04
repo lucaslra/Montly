@@ -15,6 +15,12 @@ async function request(path, options = {}) {
 
 export const fetchMe          = () => request('/auth/me')
 export const fetchSetupStatus = () => request('/auth/setup')
+export const fetchAuthConfig  = () => request('/auth/config')
+
+// Full-page navigation target that starts the OIDC authorization-code flow.
+// The backend 302-redirects the browser to the identity provider, so this is a
+// location change, not a fetch.
+export const OIDC_LOGIN_URL = `${BASE}/auth/oidc/login`
 export const setupAdmin = (username, password) =>
   request('/auth/setup', {
     method: 'POST',
