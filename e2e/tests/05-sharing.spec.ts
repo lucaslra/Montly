@@ -11,7 +11,7 @@ test.describe.serial('Task sharing', () => {
 
   test('admin creates the sharee user', async ({ page }) => {
     await page.goto('/settings')
-    await page.locator('h3', { hasText: 'Users' }).scrollIntoViewIfNeeded()
+    await page.getByRole('tab', { name: 'Users' }).click()
 
     await page.fill('#u-username', SHAREE)
     await page.fill('#u-password', SHAREE_PASS)
@@ -194,7 +194,7 @@ test.describe.serial('Task sharing', () => {
 
   test('admin deletes the sharee user', async ({ page }) => {
     await page.goto('/settings')
-    await page.locator('h3', { hasText: 'Users' }).scrollIntoViewIfNeeded()
+    await page.getByRole('tab', { name: 'Users' }).click()
 
     const userItem = page.locator('.settings-list-item', { hasText: SHAREE })
     await userItem.locator('button:has-text("Delete")').click()
