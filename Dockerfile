@@ -20,7 +20,7 @@ COPY --from=frontend /app/dist ./dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o montly .
 
 # Stage 3: Minimal runtime image
-FROM alpine:3.21
+FROM alpine:3.24
 RUN adduser -D -u 1000 montly && mkdir -p /data && chown montly:montly /data
 WORKDIR /app
 COPY --from=backend /app/montly .

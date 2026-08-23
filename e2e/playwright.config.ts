@@ -12,9 +12,15 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:8080',
     trace: 'on-first-retry',
-    // Required for Chromium in Docker containers
+    // --host-resolver-rules resolves app.localtest.me (used as BASE_URL) to the "app"
+    // container: Chromium hardcodes HSTS for the real .app gTLD, so the bare "app"
+    // hostname is forced to HTTPS and fails with ERR_SSL_PROTOCOL_ERROR otherwise.
     launchOptions: {
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--host-resolver-rules=MAP app.localtest.me app',
+      ],
     },
   },
   globalSetup: require.resolve('./global-setup'),

@@ -32,7 +32,10 @@ services:
       OIDC_ISSUER: "http://mock-oidc:9000"
       OIDC_CLIENT_ID: "montly-e2e"
       OIDC_CLIENT_SECRET: "e2e-secret"
-      OIDC_REDIRECT_URL: "http://app:8080/api/auth/oidc/callback"
+      # Uses the app.localtest.me alias, not the bare "app" hostname: Chromium hardcodes
+      # HSTS for the real .app gTLD, so a literal "app" host is forced to HTTPS and this
+      # plain-HTTP redirect target would fail with ERR_SSL_PROTOCOL_ERROR in the browser.
+      OIDC_REDIRECT_URL: "http://app.localtest.me:8080/api/auth/oidc/callback"
       OIDC_PROVIDER_NAME: "Mock SSO"
       OIDC_ADMIN_GROUP: "montly-admins"
     volumes:
@@ -50,7 +53,7 @@ services:
       start_period: 10s
 
   playwright:
-    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    image: mcr.microsoft.com/playwright:v1.62.1-noble
     working_dir: /e2e
     volumes:
       - ./e2e:/e2e
@@ -58,7 +61,12 @@ services:
       app:
         condition: service_healthy
     environment:
-      BASE_URL: http://app:8080
+      # BASE_URL is browser-facing (app.localtest.me, aliased to "app" via --host-resolver-rules
+      # to dodge Chromium's hardcoded HSTS for the real .app gTLD). INTERNAL_URL is for global-setup's
+      # plain Node fetch() calls, which don't see that alias and would otherwise hit the public
+      # 127.0.0.1 that app.localtest.me really resolves to.
+      BASE_URL: http://app.localtest.me:8080
+      INTERNAL_URL: http://app:8080
       ADMIN_USER: e2eadmin
       ADMIN_PASS: e2epassword123
     command: sh -c "npm install --silent && npx playwright test"

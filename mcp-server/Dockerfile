@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o montly-mcp .
 
-FROM alpine:3.21
+FROM alpine:3.24
 RUN adduser -D -u 1000 montly
 WORKDIR /app
 COPY --from=build /app/montly-mcp .

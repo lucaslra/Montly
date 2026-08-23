@@ -20,12 +20,16 @@ async function waitForApp(baseURL: string): Promise<void> {
 
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0].use.baseURL as string
+  // Plain Node fetch() below doesn't go through Chromium's --host-resolver-rules override,
+  // and BASE_URL's app.localtest.me alias publicly resolves to 127.0.0.1 (not this Docker
+  // network) — so these server-to-server calls use the real Docker-internal hostname instead.
+  const internalURL = process.env.INTERNAL_URL ?? baseURL
 
   // Ensure the app is up before proceeding (belt-and-suspenders on top of Docker healthcheck)
-  await waitForApp(baseURL)
+  await waitForApp(internalURL)
 
   // Bootstrap the admin account (idempotent: 409 is fine if already created)
-  const setupRes = await fetch(`${baseURL}/api/auth/setup`, {
+  const setupRes = await fetch(`${internalURL}/api/auth/setup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: ADMIN_USER, password: ADMIN_PASS }),
@@ -43,7 +47,16 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   fs.writeFileSync(path.join(fixturesDir, 'receipt.png'), Buffer.from(pngB64, 'base64'))
 
   // Log in via browser and persist the session so individual specs skip the login flow
-  const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+  // app.localtest.me resolves (via --host-resolver-rules below) to the "app" container.
+  // Chromium hardcodes HSTS for the real .app gTLD, so the bare "app" hostname is forced
+  // to HTTPS and fails with ERR_SSL_PROTOCOL_ERROR against this plain-HTTP test server.
+  const browser = await chromium.launch({
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--host-resolver-rules=MAP app.localtest.me app',
+    ],
+  })
   const page = await browser.newPage()
 
   await page.goto(baseURL)
