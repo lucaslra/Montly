@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -142,7 +143,7 @@ type realOIDCProvider struct {
 	verifier *oidc.IDTokenVerifier
 }
 
-func newRealOIDCProvider(ctx context.Context, cfg OIDCConfig) (OIDCProvider, error) {
+func newRealOIDCProvider(ctx context.Context, cfg OIDCConfig) (*realOIDCProvider, error) {
 	provider, err := oidc.NewProvider(ctx, cfg.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("oidc discovery for %q: %w", cfg.Issuer, err)
@@ -158,6 +159,80 @@ func newRealOIDCProvider(ctx context.Context, cfg OIDCConfig) (OIDCProvider, err
 		},
 		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
 	}, nil
+}
+
+// ── Lazy provider (retries discovery in the background) ─────────────────────
+
+// lazyOIDCDiscoveryBaseDelay and lazyOIDCDiscoveryMaxDelay bound the exponential
+// backoff between failed discovery attempts.
+const (
+	lazyOIDCDiscoveryBaseDelay = 5 * time.Second
+	lazyOIDCDiscoveryMaxDelay  = 5 * time.Minute
+)
+
+// lazyOIDCProvider wraps realOIDCProvider so that OIDC discovery — a network
+// call to the IdP at startup — never blocks or crashes the app. Discovery is
+// retried with exponential backoff in the background; until it succeeds,
+// AuthCodeURL returns "" and Exchange returns an error, both of which the
+// callback handlers translate into a friendly "try again shortly" response
+// instead of a broken redirect or a boot-time crash-loop.
+type lazyOIDCProvider struct {
+	cfg  OIDCConfig
+	mu   sync.RWMutex
+	real *realOIDCProvider // nil until discovery succeeds
+}
+
+func newLazyOIDCProvider(ctx context.Context, cfg OIDCConfig) *lazyOIDCProvider {
+	p := &lazyOIDCProvider{cfg: cfg}
+	go p.discoverWithRetry(ctx)
+	return p
+}
+
+func (p *lazyOIDCProvider) discoverWithRetry(ctx context.Context) {
+	delay := lazyOIDCDiscoveryBaseDelay
+	for {
+		real, err := newRealOIDCProvider(ctx, p.cfg)
+		if err == nil {
+			p.mu.Lock()
+			p.real = real
+			p.mu.Unlock()
+			log.Printf("oidc: discovery succeeded for %q", p.cfg.Issuer)
+			return
+		}
+		log.Printf("oidc: discovery for %q failed (retrying in %s): %v", p.cfg.Issuer, delay, err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if delay *= 2; delay > lazyOIDCDiscoveryMaxDelay {
+			delay = lazyOIDCDiscoveryMaxDelay
+		}
+	}
+}
+
+func (p *lazyOIDCProvider) get() *realOIDCProvider {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.real
+}
+
+// AuthCodeURL returns "" when discovery hasn't completed yet; the caller
+// (OIDCLogin) must treat that as "SSO temporarily unavailable".
+func (p *lazyOIDCProvider) AuthCodeURL(state, nonce, verifier string) string {
+	real := p.get()
+	if real == nil {
+		return ""
+	}
+	return real.AuthCodeURL(state, nonce, verifier)
+}
+
+func (p *lazyOIDCProvider) Exchange(ctx context.Context, code, nonce, verifier string) (*OIDCClaims, error) {
+	real := p.get()
+	if real == nil {
+		return nil, errors.New("oidc: provider not ready (discovery still pending)")
+	}
+	return real.Exchange(ctx, code, nonce, verifier)
 }
 
 func (p *realOIDCProvider) AuthCodeURL(state, nonce, verifier string) string {
@@ -342,9 +417,22 @@ func (h *AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "sso is not configured", http.StatusNotFound)
 		return
 	}
+	ip := clientIP(r, h.trustProxy)
+	if !h.rl.allow(ip) {
+		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		return
+	}
 	state, nonce, verifier := randToken(), randToken(), oauth2.GenerateVerifier()
 	if state == "" || nonce == "" {
 		writeServerError(w, "failed to start sso", errors.New("rand failure"))
+		return
+	}
+	// Checked before minting the state cookie: no point starting a flow that
+	// can't complete. Empty means OIDC discovery hasn't finished yet (e.g. the
+	// IdP was unreachable at boot and lazyOIDCProvider is still retrying).
+	authURL := h.oidc.AuthCodeURL(state, nonce, verifier)
+	if authURL == "" {
+		writeError(w, "sso is temporarily unavailable — please try again shortly", http.StatusServiceUnavailable)
 		return
 	}
 	signed, err := signOIDCState(oidcState{
@@ -366,7 +454,7 @@ func (h *AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode, // Lax: cookie must survive the top-level redirect back from the IdP
 		MaxAge:   int(oidcStateTTL.Seconds()),
 	})
-	http.Redirect(w, r, h.oidc.AuthCodeURL(state, nonce, verifier), http.StatusFound)
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
 // OIDCCallback completes the flow: verifies state, exchanges the code, verifies
@@ -374,6 +462,11 @@ func (h *AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	if h.oidc == nil {
 		writeError(w, "sso is not configured", http.StatusNotFound)
+		return
+	}
+	ip := clientIP(r, h.trustProxy)
+	if !h.rl.allow(ip) {
+		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
 		return
 	}
 	// Always clear the state cookie once we've read it.
@@ -417,7 +510,7 @@ func (h *AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.resolveOIDCUser(claims)
+	user, err := h.resolveOIDCUser(r.Context(), claims)
 	if err != nil {
 		var reason authReasonError
 		if errors.As(err, &reason) {
@@ -438,11 +531,18 @@ func (h *AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to create session", err)
 		return
 	}
-	go h.db.InsertAuditLog(user.ID, "login_oidc", "user", user.ID, user.Username)
+	h.rl.recordSuccess(ip)
+	h.auditQueue.Enqueue(user.ID, "login_oidc", "user", user.ID, user.Username)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+// redirectAuthError sends the browser back to the login page with a friendly
+// error reason. It also counts as a failed attempt against the rate limiter:
+// every call site here is a genuine error path (a successful callback never
+// reaches this function), so legitimate SSO users who never hit an error
+// path never accumulate failures no matter how many times they sign in.
 func (h *AuthHandler) redirectAuthError(w http.ResponseWriter, r *http.Request, reason string) {
+	h.rl.recordFailure(clientIP(r, h.trustProxy))
 	http.Redirect(w, r, "/?auth_error="+url.QueryEscape(reason), http.StatusFound)
 }
 
@@ -453,40 +553,40 @@ func (h *AuthHandler) redirectAuthError(w http.ResponseWriter, r *http.Request, 
 //
 // Admin status is synced from the IdP group when OIDC_ADMIN_GROUP is set; the
 // first-ever user is always bootstrapped as admin.
-func (h *AuthHandler) resolveOIDCUser(c *OIDCClaims) (User, error) {
+func (h *AuthHandler) resolveOIDCUser(ctx context.Context, c *OIDCClaims) (User, error) {
 	cfg := h.oidcCfg
 	inAdminGroup := cfg.AdminGroup != "" && containsString(c.Groups, cfg.AdminGroup)
 
 	// 1. Already linked.
-	if u, found, err := h.db.GetUserByOIDC(c.Issuer, c.Subject); err != nil {
+	if u, found, err := h.db.GetUserByOIDC(ctx, c.Issuer, c.Subject); err != nil {
 		return User{}, err
 	} else if found {
-		h.applyAdminSync(&u, inAdminGroup)
+		h.applyAdminSync(ctx, &u, inAdminGroup)
 		return u, nil
 	}
 
 	// 2a. Link by verified email.
 	if cfg.LinkByEmail && c.Email != "" && c.EmailVerified {
-		if u, found, err := h.db.GetUserByEmail(c.Email); err != nil {
+		if u, found, err := h.db.GetUserByEmail(ctx, c.Email); err != nil {
 			return User{}, err
 		} else if found && u.OIDCSubject == "" {
-			if err := h.db.LinkOIDCIdentity(u.ID, c.Issuer, c.Subject, c.Email); err != nil {
+			if err := h.db.LinkOIDCIdentity(ctx, u.ID, c.Issuer, c.Subject, c.Email); err != nil {
 				return User{}, err
 			}
-			h.applyAdminSync(&u, inAdminGroup)
+			h.applyAdminSync(ctx, &u, inAdminGroup)
 			return u, nil
 		}
 	}
 
 	// 2b. Link by username.
 	if cfg.LinkByUsername && c.Username != "" {
-		if u, found, err := h.db.GetUserByUsernameFull(c.Username); err != nil {
+		if u, found, err := h.db.GetUserByUsernameFull(ctx, c.Username); err != nil {
 			return User{}, err
 		} else if found && u.OIDCSubject == "" {
-			if err := h.db.LinkOIDCIdentity(u.ID, c.Issuer, c.Subject, c.Email); err != nil {
+			if err := h.db.LinkOIDCIdentity(ctx, u.ID, c.Issuer, c.Subject, c.Email); err != nil {
 				return User{}, err
 			}
-			h.applyAdminSync(&u, inAdminGroup)
+			h.applyAdminSync(ctx, &u, inAdminGroup)
 			return u, nil
 		}
 	}
@@ -495,25 +595,25 @@ func (h *AuthHandler) resolveOIDCUser(c *OIDCClaims) (User, error) {
 	if !cfg.AllowSignup {
 		return User{}, errAuthReason("signup_disabled")
 	}
-	n, err := h.db.CountUsers()
+	n, err := h.db.CountUsers(ctx)
 	if err != nil {
 		return User{}, err
 	}
-	username, err := h.uniqueUsername(c.Username)
+	username, err := h.uniqueUsername(ctx, c.Username)
 	if err != nil {
 		return User{}, err
 	}
-	return h.db.CreateOIDCUser(username, c.Email, c.Issuer, c.Subject, inAdminGroup || n == 0)
+	return h.db.CreateOIDCUser(ctx, username, c.Email, c.Issuer, c.Subject, inAdminGroup || n == 0)
 }
 
 // applyAdminSync updates the user's admin flag from group membership, but only
 // when an admin group is configured. Without OIDC_ADMIN_GROUP the flag is left
 // untouched (so a manually promoted admin stays admin).
-func (h *AuthHandler) applyAdminSync(u *User, inAdminGroup bool) {
+func (h *AuthHandler) applyAdminSync(ctx context.Context, u *User, inAdminGroup bool) {
 	if h.oidcCfg.AdminGroup == "" || u.IsAdmin == inAdminGroup {
 		return
 	}
-	if err := h.db.SetUserAdmin(u.ID, inAdminGroup); err != nil {
+	if err := h.db.SetUserAdmin(ctx, u.ID, inAdminGroup); err != nil {
 		log.Printf("oidc: admin sync for user %d: %v", u.ID, err)
 		return
 	}
@@ -530,14 +630,14 @@ func sanitizeUsername(s string) string {
 
 // uniqueUsername derives a username that does not collide with an existing one,
 // appending a numeric suffix if needed (never links to the existing account).
-func (h *AuthHandler) uniqueUsername(base string) (string, error) {
+func (h *AuthHandler) uniqueUsername(ctx context.Context, base string) (string, error) {
 	base = sanitizeUsername(base)
 	if base == "" {
 		base = "user"
 	}
 	candidate := base
 	for i := 2; i < 10000; i++ {
-		_, found, err := h.db.GetUserByUsernameFull(candidate)
+		_, found, err := h.db.GetUserByUsernameFull(ctx, candidate)
 		if err != nil {
 			return "", err
 		}

@@ -135,17 +135,17 @@ func requireAuth(secret []byte, db *DB, secure bool) func(http.Handler) http.Han
 			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 				tokenStr := strings.TrimPrefix(auth, "Bearer ")
 				hash := sha256hex(tokenStr)
-				tok, err := db.GetTokenByHash(hash)
+				tok, err := db.GetTokenByHash(r.Context(), hash)
 				if err != nil {
 					writeError(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
-				user, err := db.GetUserByID(tok.UserID)
+				user, err := db.GetUserByID(r.Context(), tok.UserID)
 				if err != nil {
 					writeError(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
-				go db.UpdateTokenLastUsed(tok.ID)
+				go db.UpdateTokenLastUsed(context.WithoutCancel(r.Context()), tok.ID)
 				claims := sessionClaims{
 					UserID:  user.ID,
 					IsAdmin: user.IsAdmin,
@@ -168,7 +168,7 @@ func requireAuth(secret []byte, db *DB, secure bool) func(http.Handler) http.Han
 				writeError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			user, err := db.GetUserByID(claims.UserID)
+			user, err := db.GetUserByID(r.Context(), claims.UserID)
 			if err != nil {
 				clearSession(w, secure)
 				writeError(w, "unauthorized", http.StatusUnauthorized)
@@ -206,6 +206,7 @@ type AuthHandler struct {
 	secure           bool
 	trustProxy       bool
 	rl               *RateLimiter
+	auditQueue       *AuditQueue
 	oidc             OIDCProvider // nil when SSO disabled
 	oidcCfg          *OIDCConfig  // nil when SSO disabled
 	passwordDisabled bool         // DISABLE_PASSWORD_LOGIN (only honored when SSO is enabled)
@@ -243,7 +244,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.GetUserByUsername(req.Username)
+	user, err := h.db.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
 		// Constant-time: perform bcrypt even on miss to prevent timing attacks.
 		bcrypt.CompareHashAndPassword(dummyHash, []byte(req.Password))
@@ -272,7 +273,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 // SetupStatus reports whether first-run setup is still needed (no users exist).
 func (h *AuthHandler) SetupStatus(w http.ResponseWriter, r *http.Request) {
-	n, err := h.db.CountUsers()
+	n, err := h.db.CountUsers(r.Context())
 	if err != nil {
 		writeServerError(w, "failed to check setup status", err)
 		return
@@ -290,7 +291,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n, err := h.db.CountUsers()
+	n, err := h.db.CountUsers(r.Context())
 	if err != nil {
 		writeServerError(w, "failed to check setup status", err)
 		return
@@ -331,7 +332,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to hash password", err)
 		return
 	}
-	admin, err := h.db.CreateUser(req.Username, string(hash), true)
+	admin, err := h.db.CreateUser(r.Context(), req.Username, string(hash), true)
 	if err != nil {
 		// A concurrent setup request can win the race and hit the UNIQUE constraint.
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "unique") {
@@ -342,7 +343,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// No-op on a fresh install (schema already has user_id), but safe to call.
-	_ = h.db.MigrateSettingsToUserScoped(admin.ID)
+	_ = h.db.MigrateSettingsToUserScoped(r.Context(), admin.ID)
 
 	claims := sessionClaims{
 		UserID:  admin.ID,
@@ -363,7 +364,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	claims := currentUser(r)
-	user, err := h.db.GetUserByID(claims.UserID)
+	user, err := h.db.GetUserByID(r.Context(), claims.UserID)
 	if err != nil {
 		clearSession(w, h.secure)
 		writeError(w, "unauthorized", http.StatusUnauthorized)
@@ -398,7 +399,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.GetUserByID(currentUser(r).UserID)
+	user, err := h.db.GetUserByID(r.Context(), currentUser(r).UserID)
 	if err != nil {
 		// Session is valid but user was deleted — force logout.
 		clearSession(w, h.secure)
@@ -417,22 +418,25 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to hash password", err)
 		return
 	}
-	if err := h.db.UpdateUserPassword(user.ID, string(newHash)); err != nil {
+	if err := h.db.UpdateUserPassword(r.Context(), user.ID, string(newHash)); err != nil {
 		writeServerError(w, "failed to update password", err)
 		return
 	}
-	go h.db.InsertAuditLog(user.ID, "change_password", "user", user.ID, user.Username)
+	h.auditQueue.Enqueue(user.ID, "change_password", "user", user.ID, user.Username)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------- user management handlers (admin only) ----------
 
 type UserHandler struct {
-	db *DB
+	db         *DB
+	rl         *RateLimiter
+	trustProxy bool
+	auditQueue *AuditQueue
 }
 
 func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.db.ListUsers()
+	users, err := h.db.ListUsers(r.Context())
 	if err != nil {
 		writeServerError(w, "failed to list users", err)
 		return
@@ -441,6 +445,12 @@ func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r, h.trustProxy)
+	if !h.rl.allow(ip) {
+		writeError(w, "too many requests — try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10) // 4 KB
 	var req struct {
 		Username string `json:"username"`
@@ -473,16 +483,18 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to hash password", err)
 		return
 	}
-	user, err := h.db.CreateUser(req.Username, string(hash), req.IsAdmin)
+	user, err := h.db.CreateUser(r.Context(), req.Username, string(hash), req.IsAdmin)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "unique") {
+			h.rl.recordFailure(ip)
 			writeError(w, "username already exists", http.StatusConflict)
 			return
 		}
 		writeServerError(w, "failed to create user", err)
 		return
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "create_user", "user", user.ID, user.Username)
+	h.rl.recordSuccess(ip)
+	h.auditQueue.Enqueue(currentUser(r).UserID, "create_user", "user", user.ID, user.Username)
 	writeJSONCreated(w, map[string]any{"id": user.ID, "username": user.Username, "is_admin": user.IsAdmin, "created_at": user.CreatedAt})
 }
 
@@ -497,7 +509,7 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Ensure at least one admin remains.
-	target, err := h.db.GetUserByID(id)
+	target, err := h.db.GetUserByID(r.Context(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "user not found", http.StatusNotFound)
 		return
@@ -507,7 +519,7 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target.IsAdmin {
-		n, err := h.db.CountAdmins()
+		n, err := h.db.CountAdmins(r.Context())
 		if err != nil {
 			writeServerError(w, "failed to check admins", err)
 			return
@@ -517,7 +529,7 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	taskCount, err := h.db.CountTasksForUser(id)
+	taskCount, err := h.db.CountTasksForUser(r.Context(), id)
 	if err != nil {
 		writeServerError(w, "failed to check user tasks", err)
 		return
@@ -527,22 +539,23 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.DeleteUser(id); err != nil {
+	if err := h.db.DeleteUser(r.Context(), id); err != nil {
 		writeServerError(w, "failed to delete user", err)
 		return
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "delete_user", "user", id, target.Username)
+	h.auditQueue.Enqueue(currentUser(r).UserID, "delete_user", "user", id, target.Username)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------- token handlers ----------
 
 type TokenHandler struct {
-	db *DB
+	db         *DB
+	auditQueue *AuditQueue
 }
 
 func (h *TokenHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
-	tokens, err := h.db.ListTokens(currentUser(r).UserID)
+	tokens, err := h.db.ListTokens(r.Context(), currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to list tokens", err)
 		return
@@ -574,13 +587,13 @@ func (h *TokenHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 	plaintext := "mt_" + base64.RawURLEncoding.EncodeToString(b)
 	hash := sha256hex(plaintext)
 
-	tok, err := h.db.CreateToken(currentUser(r).UserID, req.Name, hash)
+	tok, err := h.db.CreateToken(r.Context(), currentUser(r).UserID, req.Name, hash)
 	if err != nil {
 		writeServerError(w, "failed to create token", err)
 		return
 	}
 
-	go h.db.InsertAuditLog(currentUser(r).UserID, "create_token", "token", tok.ID, req.Name)
+	h.auditQueue.Enqueue(currentUser(r).UserID, "create_token", "token", tok.ID, req.Name)
 	writeJSONCreated(w, map[string]any{
 		"token":     tok,
 		"plaintext": plaintext,
@@ -593,13 +606,13 @@ func (h *TokenHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if err := h.db.RevokeToken(id, currentUser(r).UserID); errors.Is(err, sql.ErrNoRows) {
+	if err := h.db.RevokeToken(r.Context(), id, currentUser(r).UserID); errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "token not found", http.StatusNotFound)
 		return
 	} else if err != nil {
 		writeServerError(w, "failed to revoke token", err)
 		return
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "revoke_token", "token", id, "")
+	h.auditQueue.Enqueue(currentUser(r).UserID, "revoke_token", "token", id, "")
 	w.WriteHeader(http.StatusNoContent)
 }

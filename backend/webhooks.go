@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	mrand "math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,17 +29,17 @@ var blockedCIDRs []*net.IPNet
 
 func init() {
 	for _, cidr := range []string{
-		"127.0.0.0/8",   // IPv4 loopback
-		"::1/128",       // IPv6 loopback
-		"10.0.0.0/8",   // RFC 1918
-		"172.16.0.0/12", // RFC 1918
+		"127.0.0.0/8",    // IPv4 loopback
+		"::1/128",        // IPv6 loopback
+		"10.0.0.0/8",     // RFC 1918
+		"172.16.0.0/12",  // RFC 1918
 		"192.168.0.0/16", // RFC 1918
 		"169.254.0.0/16", // link-local / cloud metadata (AWS, GCP, Azure)
-		"fe80::/10",     // IPv6 link-local
-		"fc00::/7",      // IPv6 unique local
-		"100.64.0.0/10", // carrier-grade NAT (RFC 6598)
-		"0.0.0.0/8",    // "this" network
-		"::/128",        // IPv6 unspecified
+		"fe80::/10",      // IPv6 link-local
+		"fc00::/7",       // IPv6 unique local
+		"100.64.0.0/10",  // carrier-grade NAT (RFC 6598)
+		"0.0.0.0/8",      // "this" network
+		"::/128",         // IPv6 unspecified
 	} {
 		_, block, _ := net.ParseCIDR(cidr)
 		blockedCIDRs = append(blockedCIDRs, block)
@@ -113,6 +114,7 @@ type WebhookHandler struct {
 	db           *DB
 	client       *http.Client
 	digestSecret string
+	auditQueue   *AuditQueue
 }
 
 // webhookResponse is the API-safe view of a Webhook (omits secret).
@@ -135,7 +137,7 @@ func toWebhookResponse(wh Webhook) webhookResponse {
 }
 
 func (h *WebhookHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
-	hooks, err := h.db.ListWebhooks(currentUser(r).UserID)
+	hooks, err := h.db.ListWebhooks(r.Context(), currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to list webhooks", err)
 		return
@@ -195,12 +197,12 @@ func (h *WebhookHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := currentUser(r).UserID
-	hook, err := h.db.CreateWebhook(userID, req.URL, eventsStr, req.Secret)
+	hook, err := h.db.CreateWebhook(r.Context(), userID, req.URL, eventsStr, req.Secret)
 	if err != nil {
 		writeServerError(w, "failed to create webhook", err)
 		return
 	}
-	go h.db.InsertAuditLog(userID, "create_webhook", "webhook", hook.ID, hook.URL)
+	h.auditQueue.Enqueue(userID, "create_webhook", "webhook", hook.ID, hook.URL)
 	writeJSONCreated(w, toWebhookResponse(hook))
 }
 
@@ -210,14 +212,14 @@ func (h *WebhookHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if err := h.db.DeleteWebhook(id, currentUser(r).UserID); errors.Is(err, sql.ErrNoRows) {
+	if err := h.db.DeleteWebhook(r.Context(), id, currentUser(r).UserID); errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "webhook not found", http.StatusNotFound)
 		return
 	} else if err != nil {
 		writeServerError(w, "failed to delete webhook", err)
 		return
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "delete_webhook", "webhook", id, "")
+	h.auditQueue.Enqueue(currentUser(r).UserID, "delete_webhook", "webhook", id, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -227,7 +229,7 @@ func (h *WebhookHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	hook, err := h.db.getWebhookByID(id)
+	hook, err := h.db.getWebhookByID(r.Context(), id)
 	if err != nil || hook.UserID != currentUser(r).UserID {
 		writeError(w, "webhook not found", http.StatusNotFound)
 		return
@@ -309,10 +311,61 @@ type digestPayload struct {
 	Timestamp   string           `json:"timestamp"`
 }
 
+// webhookMaxAttempts and webhookBaseDelay control the retry policy for
+// FireWebhooks and FireMonthDigest deliveries: up to 3 attempts total (1
+// initial + 2 retries), exponential backoff with jitter between them.
+const (
+	webhookMaxAttempts = 3
+	webhookBaseDelay   = 500 * time.Millisecond
+)
+
+// deliverWebhook POSTs body to targetURL, retrying on network errors and 5xx
+// responses (a fresh request body reader is built per attempt, since a
+// *bytes.Reader is consumed after one use). 4xx responses are not retried —
+// repeating an identical request won't change a client-error outcome. Returns
+// the last error encountered, or nil on a 2xx/3xx response.
+func deliverWebhook(client *http.Client, targetURL string, body []byte, headers map[string]string) error {
+	var lastErr error
+	for attempt := 1; attempt <= webhookMaxAttempts; attempt++ {
+		req, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("build request: %w", err)
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode < 500 {
+				if resp.StatusCode >= 400 {
+					return fmt.Errorf("remote returned %d", resp.StatusCode)
+				}
+				return nil
+			}
+			lastErr = fmt.Errorf("remote returned %d", resp.StatusCode)
+		}
+		if attempt < webhookMaxAttempts {
+			delay := webhookBaseDelay * time.Duration(1<<uint(attempt-1))
+			jitter := time.Duration(mrand.Int63n(int64(delay)))
+			time.Sleep(delay + jitter)
+		}
+	}
+	return lastErr
+}
+
+func webhookSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
 // FireWebhooks sends the event to all matching webhooks for userID. Runs in a goroutine;
 // failures are logged but never bubble up to the caller.
-func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, month string, client *http.Client) {
-	hooks, err := db.GetWebhooksForUser(userID)
+func FireWebhooks(ctx context.Context, db *DB, userID int64, event string, taskID int64, taskTitle, month string, client *http.Client) {
+	hooks, err := db.GetWebhooksForUser(ctx, userID)
 	if err != nil {
 		log.Printf("FireWebhooks: list hooks: %v", err)
 		return
@@ -332,26 +385,15 @@ func FireWebhooks(db *DB, userID int64, event string, taskID int64, taskTitle, m
 			continue
 		}
 		go func(hook Webhook) {
-			req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
-			if err != nil {
-				log.Printf("FireWebhooks(%d): build request: %v", hook.ID, err)
-				return
+			headers := map[string]string{
+				"Content-Type": "application/json",
+				"User-Agent":   "Montly-Webhook/1",
 			}
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("User-Agent", "Montly-Webhook/1")
 			if hook.Secret != "" {
-				mac := hmac.New(sha256.New, []byte(hook.Secret))
-				mac.Write(body)
-				req.Header.Set("X-Montly-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+				headers["X-Montly-Signature"] = webhookSignature(hook.Secret, body)
 			}
-			resp, err := client.Do(req)
-			if err != nil {
+			if err := deliverWebhook(client, hook.URL, body, headers); err != nil {
 				log.Printf("FireWebhooks(%d): deliver: %v", hook.ID, err)
-				return
-			}
-			resp.Body.Close()
-			if resp.StatusCode >= 400 {
-				log.Printf("FireWebhooks(%d): remote returned %d", hook.ID, resp.StatusCode)
 			}
 		}(wh)
 	}
@@ -363,34 +405,26 @@ const maxDigestConcurrency = 20
 
 // FireMonthDigest sends a month.digest webhook to every user subscribed to that
 // event. Called by the monthly scheduler; runs entirely in background goroutines.
-func FireMonthDigest(db *DB, month string, client *http.Client, digestSecret string) {
-	users, err := db.ListUsers()
+func FireMonthDigest(ctx context.Context, db *DB, month string, client *http.Client, digestSecret string) {
+	hooks, err := db.GetMonthDigestWebhooks(ctx)
 	if err != nil {
-		log.Printf("FireMonthDigest: list users: %v", err)
+		log.Printf("FireMonthDigest: list digest webhooks: %v", err)
 		return
+	}
+	if len(hooks) == 0 {
+		return
+	}
+	hooksByUser := make(map[int64][]Webhook, len(hooks))
+	for _, h := range hooks {
+		hooksByUser[h.UserID] = append(hooksByUser[h.UserID], h)
 	}
 
 	sem := make(chan struct{}, maxDigestConcurrency)
 
-	for _, u := range users {
-		hooks, err := db.GetWebhooksForUser(u.ID)
+	for userID, digestHooks := range hooksByUser {
+		tasks, err := db.GetTasks(ctx, month, userID)
 		if err != nil {
-			log.Printf("FireMonthDigest: hooks for user %d: %v", u.ID, err)
-			continue
-		}
-		var digestHooks []Webhook
-		for _, h := range hooks {
-			if strings.Contains(","+h.Events+",", ",month.digest,") {
-				digestHooks = append(digestHooks, h)
-			}
-		}
-		if len(digestHooks) == 0 {
-			continue
-		}
-
-		tasks, err := db.GetTasks(month, u.ID)
-		if err != nil {
-			log.Printf("FireMonthDigest: tasks for user %d: %v", u.ID, err)
+			log.Printf("FireMonthDigest: tasks for user %d: %v", userID, err)
 			continue
 		}
 
@@ -421,29 +455,18 @@ func FireMonthDigest(db *DB, month string, client *http.Client, digestSecret str
 			sem <- struct{}{}
 			go func(h Webhook) {
 				defer func() { <-sem }()
-				req, err := http.NewRequest(http.MethodPost, h.URL, bytes.NewReader(body))
-				if err != nil {
-					log.Printf("FireMonthDigest(%d): build request: %v", h.ID, err)
-					return
+				headers := map[string]string{
+					"Content-Type": "application/json",
+					"User-Agent":   "Montly-Webhook/1",
 				}
-				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("User-Agent", "Montly-Webhook/1")
 				if digestSecret != "" {
-					req.Header.Set("X-Montly-Secret", digestSecret)
+					headers["X-Montly-Secret"] = digestSecret
 				}
 				if h.Secret != "" {
-					mac := hmac.New(sha256.New, []byte(h.Secret))
-					mac.Write(body)
-					req.Header.Set("X-Montly-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+					headers["X-Montly-Signature"] = webhookSignature(h.Secret, body)
 				}
-				resp, err := client.Do(req)
-				if err != nil {
+				if err := deliverWebhook(client, h.URL, body, headers); err != nil {
 					log.Printf("FireMonthDigest(%d): deliver: %v", h.ID, err)
-					return
-				}
-				resp.Body.Close()
-				if resp.StatusCode >= 400 {
-					log.Printf("FireMonthDigest(%d): remote returned %d", h.ID, resp.StatusCode)
 				}
 			}(hook)
 		}

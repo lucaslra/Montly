@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,13 +40,14 @@ func newTestServer(t *testing.T) *testServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	rl := newRateLimiter(ctx)
+	auditQueue := newAuditQueue(ctx, db)
 
 	testClient := &http.Client{Timeout: 10 * time.Second}
-	h := &Handler{db: db, receiptsDir: receiptsDir, client: testClient}
-	ah := &AuthHandler{db: db, secret: secret, secure: false, trustProxy: false, rl: rl}
-	uh := &UserHandler{db: db}
-	th := &TokenHandler{db: db}
-	wh := &WebhookHandler{db: db, client: testClient}
+	h := &Handler{db: db, receiptsDir: receiptsDir, client: testClient, auditQueue: auditQueue}
+	ah := &AuthHandler{db: db, secret: secret, secure: false, trustProxy: false, rl: rl, auditQueue: auditQueue}
+	uh := &UserHandler{db: db, rl: rl, trustProxy: false, auditQueue: auditQueue}
+	th := &TokenHandler{db: db, auditQueue: auditQueue}
+	wh := &WebhookHandler{db: db, client: testClient, auditQueue: auditQueue}
 
 	r := chi.NewRouter()
 	mountRoutes := func(r chi.Router) {
@@ -121,7 +123,7 @@ func (ts *testServer) authReq(t *testing.T, method, path, body string, userID in
 // The password is always "password123" (via testHash).
 func (ts *testServer) mustUser(t *testing.T, username string, isAdmin bool) User {
 	t.Helper()
-	u, err := ts.db.CreateUser(username, testHash(t), isAdmin)
+	u, err := ts.db.CreateUser(t.Context(), username, testHash(t), isAdmin)
 	if err != nil {
 		t.Fatalf("create user %q: %v", username, err)
 	}
@@ -131,7 +133,7 @@ func (ts *testServer) mustUser(t *testing.T, username string, isAdmin bool) User
 // mustTask creates a task in the test DB and fails the test if it errors.
 func (ts *testServer) mustTask(t *testing.T, title string, userID int64) Task {
 	t.Helper()
-	task, err := ts.db.CreateTask(title, "", "", "2020-01", "", "", nil, userID, 1)
+	task, err := ts.db.CreateTask(t.Context(), title, "", "", "2020-01", "", "", nil, userID, 1)
 	if err != nil {
 		t.Fatalf("create task %q: %v", title, err)
 	}
@@ -336,7 +338,7 @@ func TestMe(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		req := ts.authReq(t, http.MethodGet, "/api/auth/me", "", alice.ID, false)
-		if err := ts.db.DeleteUser(alice.ID); err != nil {
+		if err := ts.db.DeleteUser(t.Context(), alice.ID); err != nil {
 			t.Fatalf("delete user: %v", err)
 		}
 		w := ts.do(req)
@@ -551,9 +553,9 @@ func TestUpdateTask(t *testing.T) {
 	t.Run("amount change backfills past completions", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		task, _ := ts.db.CreateTask("Netflix", "", "subscription", "2026-01", "", "10", nil, alice.ID, 1)
-		ts.db.AddCompletion(task.ID, "2026-01")
-		ts.db.AddCompletion(task.ID, "2026-02")
+		task, _ := ts.db.CreateTask(t.Context(), "Netflix", "", "subscription", "2026-01", "", "10", nil, alice.ID, 1)
+		ts.db.AddCompletion(t.Context(), task.ID, "2026-01")
+		ts.db.AddCompletion(t.Context(), task.ID, "2026-02")
 
 		w := ts.do(ts.authReq(t, http.MethodPut,
 			fmt.Sprintf("/api/tasks/%d", task.ID),
@@ -562,7 +564,7 @@ func TestUpdateTask(t *testing.T) {
 		assertStatus(t, w, http.StatusOK)
 
 		for _, month := range []string{"2026-01", "2026-02"} {
-			c, _, _ := ts.db.GetCompletion(task.ID, month)
+			c, _, _ := ts.db.GetCompletion(t.Context(), task.ID, month)
 			if c.Amount != "10" {
 				t.Errorf("completion %s: amount = %q, want '10'", month, c.Amount)
 			}
@@ -617,7 +619,7 @@ func TestToggleCompletion(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		task := ts.mustTask(t, "Pay rent", alice.ID)
-		if _, err := ts.db.AddCompletion(task.ID, "2026-04"); err != nil {
+		if _, err := ts.db.AddCompletion(t.Context(), task.ID, "2026-04"); err != nil {
 			t.Fatalf("seed completion: %v", err)
 		}
 		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle",
@@ -662,7 +664,7 @@ func TestPatchCompletion(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		task := ts.mustTask(t, "Pay rent", alice.ID)
-		if _, err := ts.db.AddCompletion(task.ID, "2026-04"); err != nil {
+		if _, err := ts.db.AddCompletion(t.Context(), task.ID, "2026-04"); err != nil {
 			t.Fatalf("seed completion: %v", err)
 		}
 		return ts, alice, task
@@ -878,7 +880,7 @@ func TestExportCSV(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		task := ts.mustTask(t, "Pay rent", alice.ID)
-		ts.db.AddCompletion(task.ID, "2026-03")
+		ts.db.AddCompletion(t.Context(), task.ID, "2026-03")
 		w := ts.do(ts.authReq(t, http.MethodGet,
 			"/api/export/completions.csv?from=2026-01&to=2026-04",
 			"", alice.ID, false))
@@ -892,7 +894,7 @@ func TestExportCSV(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		task := ts.mustTask(t, "Outside task", alice.ID)
-		ts.db.AddCompletion(task.ID, "2025-06")
+		ts.db.AddCompletion(t.Context(), task.ID, "2025-06")
 		w := ts.do(ts.authReq(t, http.MethodGet,
 			"/api/export/completions.csv?from=2026-01&to=2026-04",
 			"", alice.ID, false))
@@ -968,9 +970,9 @@ func TestImportCSV(t *testing.T) {
 	t.Run("round-trip: export then import produces same completions", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		task, _ := ts.db.CreateTask("Rent", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
-		ts.db.AddCompletion(task.ID, "2026-03")
-		ts.db.SetCompletionAmount(task.ID, "2026-03", "800")
+		task, _ := ts.db.CreateTask(t.Context(), "Rent", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
+		ts.db.AddCompletion(t.Context(), task.ID, "2026-03")
+		ts.db.SetCompletionAmount(t.Context(), task.ID, "2026-03", "800")
 
 		// Export
 		exportW := ts.do(ts.authReq(t, http.MethodGet, "/api/export/completions.csv?from=2026-03&to=2026-03", "", alice.ID, false))
@@ -1043,9 +1045,9 @@ func TestImportCSV(t *testing.T) {
 	t.Run("upsert: re-import updates existing completion", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		task, _ := ts.db.CreateTask("Phone", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
-		ts.db.AddCompletion(task.ID, "2026-01")
-		ts.db.SetCompletionAmount(task.ID, "2026-01", "20")
+		task, _ := ts.db.CreateTask(t.Context(), "Phone", "", "payment", "2020-01", "", "", nil, alice.ID, 1)
+		ts.db.AddCompletion(t.Context(), task.ID, "2026-01")
+		ts.db.SetCompletionAmount(t.Context(), task.ID, "2026-01", "20")
 
 		csv := validHeader + "Phone,payment,2026-01,completed,25,no\n"
 		req := addAuth(t, ts, buildCSVUpload(t, http.MethodPost, "/api/import/completions.csv", csv), alice.ID, false)
@@ -1057,7 +1059,7 @@ func TestImportCSV(t *testing.T) {
 		if result.CompletionsUpdated != 1 {
 			t.Errorf("completions_updated: got %d, want 1", result.CompletionsUpdated)
 		}
-		c, _, _ := ts.db.GetCompletion(task.ID, "2026-01")
+		c, _, _ := ts.db.GetCompletion(t.Context(), task.ID, "2026-01")
 		if c.Amount != "25" {
 			t.Errorf("amount after upsert: got %q, want %q", c.Amount, "25")
 		}
@@ -1241,7 +1243,7 @@ func TestRequireAuth_BearerToken(t *testing.T) {
 		// Create a token directly in the DB so we know the plaintext.
 		plaintext := "mt_testtoken123"
 		hash := sha256hex(plaintext)
-		ts.db.CreateToken(alice.ID, "test", hash)
+		ts.db.CreateToken(t.Context(), alice.ID, "test", hash)
 
 		req := ts.req(t, http.MethodGet, "/api/auth/me", "")
 		req.Header.Set("Authorization", "Bearer "+plaintext)
@@ -1417,7 +1419,7 @@ func TestListTokens(t *testing.T) {
 	}
 
 	// After creating a token via DB, it appears in the list.
-	ts.db.CreateToken(alice.ID, "my token", "hash1")
+	ts.db.CreateToken(t.Context(), alice.ID, "my token", "hash1")
 	w = ts.do(ts.authReq(t, http.MethodGet, "/api/auth/tokens", "", alice.ID, false))
 	assertStatus(t, w, http.StatusOK)
 	decodeJSON(t, w, &tokens)
@@ -1462,7 +1464,7 @@ func TestRevokeToken(t *testing.T) {
 	t.Run("revokes own token", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		tok, _ := ts.db.CreateToken(alice.ID, "test", "hash1")
+		tok, _ := ts.db.CreateToken(t.Context(), alice.ID, "test", "hash1")
 		w := ts.do(ts.authReq(t, http.MethodDelete,
 			fmt.Sprintf("/api/auth/tokens/%d", tok.ID), "",
 			alice.ID, false))
@@ -1473,7 +1475,7 @@ func TestRevokeToken(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
-		tok, _ := ts.db.CreateToken(alice.ID, "alice-token", "hash2")
+		tok, _ := ts.db.CreateToken(t.Context(), alice.ID, "alice-token", "hash2")
 		w := ts.do(ts.authReq(t, http.MethodDelete,
 			fmt.Sprintf("/api/auth/tokens/%d", tok.ID), "",
 			bob.ID, false))
@@ -1523,7 +1525,7 @@ func TestListCompletions(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		task := ts.mustTask(t, "Pay rent", alice.ID)
-		ts.db.AddCompletion(task.ID, "2026-04")
+		ts.db.AddCompletion(t.Context(), task.ID, "2026-04")
 
 		w := ts.do(ts.authReq(t, http.MethodGet, "/api/completions?month=2026-04",
 			"", alice.ID, false))
@@ -1547,7 +1549,7 @@ func TestListCompletions(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
 		task := ts.mustTask(t, "Alice task", alice.ID)
-		ts.db.AddCompletion(task.ID, "2026-04")
+		ts.db.AddCompletion(t.Context(), task.ID, "2026-04")
 
 		w := ts.do(ts.authReq(t, http.MethodGet, "/api/completions?month=2026-04",
 			"", bob.ID, false))
@@ -1584,7 +1586,7 @@ func TestWebhooksHTTP_List(t *testing.T) {
 	t.Run("returns created webhook without secret field", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "s3cr3t")
+		ts.db.CreateWebhook(t.Context(), alice.ID, "https://example.com/hook", "task.completed", "s3cr3t")
 
 		w := ts.do(ts.authReq(t, http.MethodGet, "/api/webhooks", "", alice.ID, false))
 		assertStatus(t, w, http.StatusOK)
@@ -1605,7 +1607,7 @@ func TestWebhooksHTTP_List(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
-		ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "")
+		ts.db.CreateWebhook(t.Context(), alice.ID, "https://example.com/hook", "task.completed", "")
 
 		w := ts.do(ts.authReq(t, http.MethodGet, "/api/webhooks", "", bob.ID, false))
 		assertStatus(t, w, http.StatusOK)
@@ -1699,7 +1701,7 @@ func TestWebhooksHTTP_Delete(t *testing.T) {
 	t.Run("deletes own webhook", func(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
-		wh, _ := ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "")
+		wh, _ := ts.db.CreateWebhook(t.Context(), alice.ID, "https://example.com/hook", "task.completed", "")
 		w := ts.do(ts.authReq(t, http.MethodDelete,
 			fmt.Sprintf("/api/webhooks/%d", wh.ID), "",
 			alice.ID, false))
@@ -1710,7 +1712,7 @@ func TestWebhooksHTTP_Delete(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
-		wh, _ := ts.db.CreateWebhook(alice.ID, "https://example.com/hook", "task.completed", "")
+		wh, _ := ts.db.CreateWebhook(t.Context(), alice.ID, "https://example.com/hook", "task.completed", "")
 		w := ts.do(ts.authReq(t, http.MethodDelete,
 			fmt.Sprintf("/api/webhooks/%d", wh.ID), "",
 			bob.ID, false))
@@ -1769,14 +1771,14 @@ func (c *webhookCapture) expectNoHit(t *testing.T) {
 func TestFireWebhooks_Delivery(t *testing.T) {
 	t.Run("delivers payload with correct fields", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Pay rent", "", "payment", "2020-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		task, _ := db.CreateTask(t.Context(), "Pay rent", "", "payment", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "")
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "task.completed", "")
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
+		FireWebhooks(t.Context(), db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 
@@ -1803,14 +1805,14 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 
 	t.Run("sets correct Content-Type header", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		task, _ := db.CreateTask(t.Context(), "Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "")
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "task.completed", "")
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
+		FireWebhooks(t.Context(), db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 		if ct := hit.headers.Get("Content-Type"); ct != "application/json" {
@@ -1820,15 +1822,15 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 
 	t.Run("includes HMAC signature when secret is set", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		task, _ := db.CreateTask(t.Context(), "Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 		secret := "webhook-secret-123"
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", secret)
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "task.completed", secret)
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
+		FireWebhooks(t.Context(), db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 
@@ -1848,14 +1850,14 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 
 	t.Run("no signature header when secret is empty", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		task, _ := db.CreateTask(t.Context(), "Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "") // no secret
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "task.completed", "") // no secret
 
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
+		FireWebhooks(t.Context(), db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
 		hit := cap.waitHit(t)
 		if sig := hit.headers.Get("X-Montly-Signature"); sig != "" {
@@ -1867,47 +1869,120 @@ func TestFireWebhooks_Delivery(t *testing.T) {
 func TestFireWebhooks_EventFilter(t *testing.T) {
 	t.Run("only fires webhook subscribed to the matching event", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		task, _ := db.CreateTask(t.Context(), "Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		completedCap := newWebhookCapture()
 		defer completedCap.close()
 		uncompletedCap := newWebhookCapture()
 		defer uncompletedCap.close()
 
-		db.CreateWebhook(user.ID, completedCap.srv.URL, "task.completed", "")
-		db.CreateWebhook(user.ID, uncompletedCap.srv.URL, "task.uncompleted", "")
+		db.CreateWebhook(t.Context(), user.ID, completedCap.srv.URL, "task.completed", "")
+		db.CreateWebhook(t.Context(), user.ID, uncompletedCap.srv.URL, "task.uncompleted", "")
 
 		// Fire only the completed event.
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
+		FireWebhooks(t.Context(), db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 
-		completedCap.waitHit(t)          // must arrive
-		uncompletedCap.expectNoHit(t)    // must NOT arrive
+		completedCap.waitHit(t)       // must arrive
+		uncompletedCap.expectNoHit(t) // must NOT arrive
 	})
 
 	t.Run("fires webhook subscribed to both events", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		task, _ := db.CreateTask(t.Context(), "Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed,task.uncompleted", "")
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "task.completed,task.uncompleted", "")
 
-		FireWebhooks(db, user.ID, "task.uncompleted", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
+		FireWebhooks(t.Context(), db, user.ID, "task.uncompleted", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 		cap.waitHit(t) // must arrive for uncompleted too
 	})
 
 	t.Run("does not fire when user has no webhooks", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		task, _ := db.CreateTask("Task", "", "", "2020-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		task, _ := db.CreateTask(t.Context(), "Task", "", "", "2020-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
 		// No webhooks registered — cap should receive nothing.
-		FireWebhooks(db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
+		FireWebhooks(t.Context(), db, user.ID, "task.completed", task.ID, task.Title, "2026-04", &http.Client{Timeout: 10 * time.Second})
 		cap.expectNoHit(t)
+	})
+}
+
+func TestDeliverWebhook_Retry(t *testing.T) {
+	t.Run("retries on 5xx and succeeds once the endpoint recovers", func(t *testing.T) {
+		var hits int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if atomic.AddInt32(&hits, 1) <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		err := deliverWebhook(&http.Client{Timeout: 2 * time.Second}, srv.URL, []byte(`{}`), nil)
+		if err != nil {
+			t.Fatalf("expected eventual success, got: %v", err)
+		}
+		if got := atomic.LoadInt32(&hits); got != 3 {
+			t.Errorf("hits: got %d, want 3 (2 failures + 1 success)", got)
+		}
+	})
+
+	t.Run("gives up after max attempts on persistent 5xx", func(t *testing.T) {
+		var hits int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		err := deliverWebhook(&http.Client{Timeout: 2 * time.Second}, srv.URL, []byte(`{}`), nil)
+		if err == nil {
+			t.Fatal("expected an error after exhausting retries")
+		}
+		if got := atomic.LoadInt32(&hits); got != webhookMaxAttempts {
+			t.Errorf("hits: got %d, want %d", got, webhookMaxAttempts)
+		}
+	})
+
+	t.Run("does not retry on 4xx", func(t *testing.T) {
+		var hits int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+		defer srv.Close()
+
+		err := deliverWebhook(&http.Client{Timeout: 2 * time.Second}, srv.URL, []byte(`{}`), nil)
+		if err == nil {
+			t.Fatal("expected an error for a 4xx response")
+		}
+		if got := atomic.LoadInt32(&hits); got != 1 {
+			t.Errorf("hits: got %d, want 1 (4xx must not be retried)", got)
+		}
+	})
+
+	t.Run("succeeds immediately on 2xx with no retries", func(t *testing.T) {
+		var hits int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		err := deliverWebhook(&http.Client{Timeout: 2 * time.Second}, srv.URL, []byte(`{}`), nil)
+		if err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+		if got := atomic.LoadInt32(&hits); got != 1 {
+			t.Errorf("hits: got %d, want 1", got)
+		}
 	})
 }
 
@@ -2250,13 +2325,13 @@ func TestTaskShareHandlers(t *testing.T) {
 		bob := ts.mustUser(t, "bob", false)
 		task := ts.mustTask(t, "Bill", alice.ID)
 
-		ts.db.AddShare(task.ID, bob.ID)
+		ts.db.AddShare(t.Context(), task.ID, bob.ID)
 
 		w := ts.do(ts.authReq(t, http.MethodDelete,
 			fmt.Sprintf("/api/tasks/%d/shares/%d", task.ID, bob.ID), "", alice.ID, false))
 		assertStatus(t, w, http.StatusNoContent)
 
-		shared, _ := ts.db.IsSharedWith(task.ID, bob.ID)
+		shared, _ := ts.db.IsSharedWith(t.Context(), task.ID, bob.ID)
 		if shared {
 			t.Error("share should have been removed")
 		}
@@ -2286,7 +2361,7 @@ func TestSharedTaskAccess(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
 		task := ts.mustTask(t, "Bill", alice.ID)
-		ts.db.AddShare(task.ID, bob.ID)
+		ts.db.AddShare(t.Context(), task.ID, bob.ID)
 
 		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
 		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/toggle", body, bob.ID, false))
@@ -2298,7 +2373,7 @@ func TestSharedTaskAccess(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
 		task := ts.mustTask(t, "Bill", alice.ID)
-		ts.db.AddShare(task.ID, bob.ID)
+		ts.db.AddShare(t.Context(), task.ID, bob.ID)
 
 		// Complete the task first (as alice, the owner).
 		toggleBody := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
@@ -2315,7 +2390,7 @@ func TestSharedTaskAccess(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
 		task := ts.mustTask(t, "Bill", alice.ID)
-		ts.db.AddShare(task.ID, bob.ID)
+		ts.db.AddShare(t.Context(), task.ID, bob.ID)
 
 		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
 		w := ts.do(ts.authReq(t, http.MethodPost, "/api/completions/skip", body, bob.ID, false))
@@ -2406,12 +2481,12 @@ func TestToggleCompletionWebhookActorVsOwner(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		bob := ts.mustUser(t, "bob", false)
 		task := ts.mustTask(t, "Bill", alice.ID)
-		ts.db.AddShare(task.ID, bob.ID)
+		ts.db.AddShare(t.Context(), task.ID, bob.ID)
 
 		// Alice has a webhook; bob does not.
 		cap := newWebhookCapture()
 		defer cap.close()
-		ts.db.CreateWebhook(alice.ID, cap.srv.URL, "task.completed", "")
+		ts.db.CreateWebhook(t.Context(), alice.ID, cap.srv.URL, "task.completed", "")
 
 		// Bob toggles the shared task.
 		body := fmt.Sprintf(`{"task_id":%d,"month":"2020-01"}`, task.ID)
@@ -2453,7 +2528,7 @@ func TestListAuditLogs(t *testing.T) {
 		admin := ts.mustUser(t, "admin", true)
 		task := ts.mustTask(t, "Rent", admin.ID)
 		// Insert an audit log directly
-		ts.db.InsertAuditLog(admin.ID, "create", "task", task.ID, task.Title)
+		ts.db.InsertAuditLog(t.Context(), admin.ID, "create", "task", task.ID, task.Title)
 
 		w := ts.do(ts.authReq(t, http.MethodGet, "/api/audit-logs", "", admin.ID, true))
 		assertStatus(t, w, http.StatusOK)
@@ -2473,7 +2548,7 @@ func TestListAuditLogs(t *testing.T) {
 		task := ts.mustTask(t, "Task", admin.ID)
 		// Insert 5 log entries
 		for i := 0; i < 5; i++ {
-			ts.db.InsertAuditLog(admin.ID, "action", "task", task.ID, fmt.Sprintf("item%d", i))
+			ts.db.InsertAuditLog(t.Context(), admin.ID, "action", "task", task.ID, fmt.Sprintf("item%d", i))
 		}
 
 		w := ts.do(ts.authReq(t, http.MethodGet, "/api/audit-logs?limit=2&offset=1", "", admin.ID, true))
@@ -2517,10 +2592,10 @@ func TestServeReceipt(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		task := ts.mustTask(t, "Rent", alice.ID)
 		// Add completion with the receipt filename in the DB.
-		if _, err := ts.db.AddCompletion(task.ID, "2026-04"); err != nil {
+		if _, err := ts.db.AddCompletion(t.Context(), task.ID, "2026-04"); err != nil {
 			t.Fatalf("AddCompletion: %v", err)
 		}
-		if _, err := ts.db.SetCompletionReceipt(task.ID, "2026-04", validUUID); err != nil {
+		if _, err := ts.db.SetCompletionReceipt(t.Context(), task.ID, "2026-04", validUUID); err != nil {
 			t.Fatalf("SetCompletionReceipt: %v", err)
 		}
 		// File does not exist on disk — http.ServeFile returns 404.
@@ -2532,10 +2607,10 @@ func TestServeReceipt(t *testing.T) {
 		ts := newTestServer(t)
 		alice := ts.mustUser(t, "alice", false)
 		task := ts.mustTask(t, "Rent", alice.ID)
-		if _, err := ts.db.AddCompletion(task.ID, "2026-04"); err != nil {
+		if _, err := ts.db.AddCompletion(t.Context(), task.ID, "2026-04"); err != nil {
 			t.Fatalf("AddCompletion: %v", err)
 		}
-		if _, err := ts.db.SetCompletionReceipt(task.ID, "2026-04", validUUID); err != nil {
+		if _, err := ts.db.SetCompletionReceipt(t.Context(), task.ID, "2026-04", validUUID); err != nil {
 			t.Fatalf("SetCompletionReceipt: %v", err)
 		}
 
@@ -2562,7 +2637,7 @@ func TestWebhookTest(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		cap := newWebhookCapture()
 		defer cap.close()
-		hook, err := ts.db.CreateWebhook(alice.ID, cap.srv.URL, "task.completed", "")
+		hook, err := ts.db.CreateWebhook(t.Context(), alice.ID, cap.srv.URL, "task.completed", "")
 		if err != nil {
 			t.Fatalf("CreateWebhook: %v", err)
 		}
@@ -2584,7 +2659,7 @@ func TestWebhookTest(t *testing.T) {
 		bob := ts.mustUser(t, "bob", false)
 		cap := newWebhookCapture()
 		defer cap.close()
-		hook, _ := ts.db.CreateWebhook(alice.ID, cap.srv.URL, "task.completed", "")
+		hook, _ := ts.db.CreateWebhook(t.Context(), alice.ID, cap.srv.URL, "task.completed", "")
 
 		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/webhooks/%d/test", hook.ID), "", bob.ID, false))
 		assertStatus(t, w, http.StatusNotFound)
@@ -2596,7 +2671,7 @@ func TestWebhookTest(t *testing.T) {
 		alice := ts.mustUser(t, "alice", false)
 		cap := newWebhookCapture()
 		defer cap.close()
-		hook, _ := ts.db.CreateWebhook(alice.ID, cap.srv.URL, "month.digest", "")
+		hook, _ := ts.db.CreateWebhook(t.Context(), alice.ID, cap.srv.URL, "month.digest", "")
 
 		w := ts.do(ts.authReq(t, http.MethodPost, fmt.Sprintf("/api/webhooks/%d/test", hook.ID), "", alice.ID, false))
 		assertStatus(t, w, http.StatusOK)
@@ -2620,14 +2695,14 @@ func TestWebhookTest(t *testing.T) {
 func TestFireMonthDigest(t *testing.T) {
 	t.Run("sends digest to user subscribed to month.digest", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		db.CreateTask("Netflix", "", "subscription", "2026-01", "", "15", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		db.CreateTask(t.Context(), "Netflix", "", "subscription", "2026-01", "", "15", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
+		FireMonthDigest(t.Context(), db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 
 		hit := cap.waitHit(t)
 		var payload digestPayload
@@ -2647,28 +2722,28 @@ func TestFireMonthDigest(t *testing.T) {
 
 	t.Run("user without month.digest hook receives nothing", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		db.CreateTask("Netflix", "", "subscription", "2026-01", "", "15", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		db.CreateTask(t.Context(), "Netflix", "", "subscription", "2026-01", "", "15", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "task.completed", "") // NOT month.digest
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "task.completed", "") // NOT month.digest
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
+		FireMonthDigest(t.Context(), db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 		cap.expectNoHit(t)
 	})
 
 	t.Run("non-numeric amount is excluded from total", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
-		db.CreateTask("Task A", "", "bill", "2026-01", "", "10", nil, user.ID, 1)
-		db.CreateTask("Task B", "", "reminder", "2026-01", "", "", nil, user.ID, 1)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
+		db.CreateTask(t.Context(), "Task A", "", "bill", "2026-01", "", "10", nil, user.ID, 1)
+		db.CreateTask(t.Context(), "Task B", "", "reminder", "2026-01", "", "", nil, user.ID, 1)
 
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
+		FireMonthDigest(t.Context(), db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 
 		hit := cap.waitHit(t)
 		var payload digestPayload
@@ -2683,13 +2758,13 @@ func TestFireMonthDigest(t *testing.T) {
 
 	t.Run("HMAC signature included when secret is set", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
 		secret := "digest-secret-xyz"
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", secret)
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "month.digest", secret)
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
+		FireMonthDigest(t.Context(), db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 
 		hit := cap.waitHit(t)
 		sig := hit.headers.Get("X-Montly-Signature")
@@ -2706,12 +2781,12 @@ func TestFireMonthDigest(t *testing.T) {
 
 	t.Run("X-Montly-Secret header sent when digestSecret is non-empty", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "my-digest-secret")
+		FireMonthDigest(t.Context(), db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "my-digest-secret")
 
 		hit := cap.waitHit(t)
 		if got := hit.headers.Get("X-Montly-Secret"); got != "my-digest-secret" {
@@ -2721,12 +2796,12 @@ func TestFireMonthDigest(t *testing.T) {
 
 	t.Run("X-Montly-Secret header absent when digestSecret is empty", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
 		cap := newWebhookCapture()
 		defer cap.close()
-		db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+		db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "month.digest", "")
 
-		FireMonthDigest(db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
+		FireMonthDigest(t.Context(), db, "2026-05", &http.Client{Timeout: 10 * time.Second}, "")
 
 		hit := cap.waitHit(t)
 		if got := hit.headers.Get("X-Montly-Secret"); got != "" {
@@ -2747,11 +2822,11 @@ func TestIsPrivateIP(t *testing.T) {
 		"192.168.255.255",
 		"169.254.169.254", // AWS/GCP/Azure metadata endpoint
 		"169.254.0.1",
-		"::1",            // IPv6 loopback
-		"fc00::1",        // IPv6 unique local
-		"fe80::1",        // IPv6 link-local
-		"100.64.0.1",     // carrier-grade NAT (RFC 6598)
-		"0.0.0.1",        // "this" network
+		"::1",        // IPv6 loopback
+		"fc00::1",    // IPv6 unique local
+		"fe80::1",    // IPv6 link-local
+		"100.64.0.1", // carrier-grade NAT (RFC 6598)
+		"0.0.0.1",    // "this" network
 	}
 	for _, addr := range private {
 		ip := net.ParseIP(addr)
@@ -2827,10 +2902,10 @@ func TestSecurityHeaders(t *testing.T) {
 func TestWebhookTest_DigestSecret(t *testing.T) {
 	t.Run("month.digest test delivery includes X-Montly-Secret when set", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
 		cap := newWebhookCapture()
 		defer cap.close()
-		hook, _ := db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+		hook, _ := db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "month.digest", "")
 
 		wh := &WebhookHandler{
 			db:           db,
@@ -2860,10 +2935,10 @@ func TestWebhookTest_DigestSecret(t *testing.T) {
 
 	t.Run("month.digest test delivery omits X-Montly-Secret when not set", func(t *testing.T) {
 		db := setupTestDB(t)
-		user, _ := db.CreateUser("alice", testHash(t), false)
+		user, _ := db.CreateUser(t.Context(), "alice", testHash(t), false)
 		cap := newWebhookCapture()
 		defer cap.close()
-		hook, _ := db.CreateWebhook(user.ID, cap.srv.URL, "month.digest", "")
+		hook, _ := db.CreateWebhook(t.Context(), user.ID, cap.srv.URL, "month.digest", "")
 
 		wh := &WebhookHandler{
 			db:     db,

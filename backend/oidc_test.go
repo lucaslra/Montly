@@ -49,11 +49,12 @@ func newOIDCHandler(t *testing.T, cfg *OIDCConfig, provider OIDCProvider) (*Auth
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return &AuthHandler{
-		db:      db,
-		secret:  []byte("oidc-test-secret"),
-		rl:      newRateLimiter(ctx),
-		oidc:    provider,
-		oidcCfg: cfg,
+		db:         db,
+		secret:     []byte("oidc-test-secret"),
+		rl:         newRateLimiter(ctx),
+		auditQueue: newAuditQueue(ctx, db),
+		oidc:       provider,
+		oidcCfg:    cfg,
 	}, db
 }
 
@@ -61,6 +62,31 @@ func setUserEmail(t *testing.T, db *DB, userID int64, email string) {
 	t.Helper()
 	if _, err := db.Exec(db.q(`UPDATE users SET email = ? WHERE id = ?`), email, userID); err != nil {
 		t.Fatalf("set email: %v", err)
+	}
+}
+
+// ── lazy provider (discovery resilience) ────────────────────────────────────
+
+func TestLazyOIDCProvider_NotReadyUntilDiscoverySucceeds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// An issuer that will never successfully answer discovery: newLazyOIDCProvider
+	// must still return immediately (not block on the network call) and report
+	// "not ready" rather than panicking or returning a broken URL.
+	cfg := OIDCConfig{
+		Issuer:       "http://127.0.0.1:1/does-not-exist",
+		ClientID:     "client",
+		ClientSecret: "secret",
+		RedirectURL:  "http://localhost/callback",
+	}
+	p := newLazyOIDCProvider(ctx, cfg)
+
+	if url := p.AuthCodeURL("state", "nonce", "verifier"); url != "" {
+		t.Errorf("AuthCodeURL before discovery: got %q, want empty", url)
+	}
+	if _, err := p.Exchange(ctx, "code", "nonce", "verifier"); err == nil {
+		t.Error("Exchange before discovery: expected an error, got nil")
 	}
 }
 
@@ -198,7 +224,7 @@ func TestExtractClaims(t *testing.T) {
 
 func TestResolveOIDCUser_JITFirstUserIsAdmin(t *testing.T) {
 	ah, db := newOIDCHandler(t, testOIDCCfg(), nil)
-	u, err := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s1", Username: "alice", Email: "alice@x", EmailVerified: true})
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s1", Username: "alice", Email: "alice@x", EmailVerified: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +235,7 @@ func TestResolveOIDCUser_JITFirstUserIsAdmin(t *testing.T) {
 		t.Errorf("username = %q", u.Username)
 	}
 	// Subsequent lookup returns the same account (no duplicate).
-	got, found, _ := db.GetUserByOIDC("https://idp.example", "s1")
+	got, found, _ := db.GetUserByOIDC(t.Context(), "https://idp.example", "s1")
 	if !found || got.ID != u.ID {
 		t.Error("account not linked")
 	}
@@ -217,10 +243,10 @@ func TestResolveOIDCUser_JITFirstUserIsAdmin(t *testing.T) {
 
 func TestResolveOIDCUser_JITSecondUserNotAdmin(t *testing.T) {
 	ah, db := newOIDCHandler(t, testOIDCCfg(), nil)
-	if _, err := db.CreateUser("existing", "hash", true); err != nil {
+	if _, err := db.CreateUser(t.Context(), "existing", "hash", true); err != nil {
 		t.Fatal(err)
 	}
-	u, err := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s2", Username: "newbie", Email: "n@x"})
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s2", Username: "newbie", Email: "n@x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,26 +257,26 @@ func TestResolveOIDCUser_JITSecondUserNotAdmin(t *testing.T) {
 
 func TestResolveOIDCUser_AlreadyLinked(t *testing.T) {
 	ah, db := newOIDCHandler(t, testOIDCCfg(), nil)
-	created, _ := db.CreateOIDCUser("alice", "alice@x", "https://idp.example", "s1", false)
-	n0, _ := db.CountUsers()
-	u, err := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s1", Username: "alice"})
+	created, _ := db.CreateOIDCUser(t.Context(), "alice", "alice@x", "https://idp.example", "s1", false)
+	n0, _ := db.CountUsers(t.Context())
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s1", Username: "alice"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if u.ID != created.ID {
 		t.Error("should return existing linked user")
 	}
-	if n1, _ := db.CountUsers(); n1 != n0 {
+	if n1, _ := db.CountUsers(t.Context()); n1 != n0 {
 		t.Error("should not create a new user")
 	}
 }
 
 func TestResolveOIDCUser_LinkByVerifiedEmail(t *testing.T) {
 	ah, db := newOIDCHandler(t, testOIDCCfg(), nil)
-	carol, _ := db.CreateUser("carol", "hash", false)
+	carol, _ := db.CreateUser(t.Context(), "carol", "hash", false)
 	setUserEmail(t, db, carol.ID, "carol@example.com")
 
-	u, err := ah.resolveOIDCUser(&OIDCClaims{
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{
 		Issuer: "https://idp.example", Subject: "s-carol",
 		Username: "carol-sso", Email: "carol@example.com", EmailVerified: true,
 	})
@@ -260,17 +286,17 @@ func TestResolveOIDCUser_LinkByVerifiedEmail(t *testing.T) {
 	if u.ID != carol.ID {
 		t.Errorf("should link to carol (id %d), got %d", carol.ID, u.ID)
 	}
-	if linked, found, _ := db.GetUserByOIDC("https://idp.example", "s-carol"); !found || linked.ID != carol.ID {
+	if linked, found, _ := db.GetUserByOIDC(t.Context(), "https://idp.example", "s-carol"); !found || linked.ID != carol.ID {
 		t.Error("carol not linked to subject")
 	}
 }
 
 func TestResolveOIDCUser_UnverifiedEmailDoesNotLink(t *testing.T) {
 	ah, db := newOIDCHandler(t, testOIDCCfg(), nil)
-	carol, _ := db.CreateUser("carol", "hash", false)
+	carol, _ := db.CreateUser(t.Context(), "carol", "hash", false)
 	setUserEmail(t, db, carol.ID, "carol@example.com")
 
-	u, err := ah.resolveOIDCUser(&OIDCClaims{
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{
 		Issuer: "https://idp.example", Subject: "s-x",
 		Username: "carol-sso", Email: "carol@example.com", EmailVerified: false,
 	})
@@ -284,8 +310,8 @@ func TestResolveOIDCUser_UnverifiedEmailDoesNotLink(t *testing.T) {
 
 func TestResolveOIDCUser_LinkByUsername(t *testing.T) {
 	ah, db := newOIDCHandler(t, testOIDCCfg(), nil)
-	dave, _ := db.CreateUser("dave", "hash", false)
-	u, err := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s-dave", Username: "dave"})
+	dave, _ := db.CreateUser(t.Context(), "dave", "hash", false)
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s-dave", Username: "dave"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,10 +325,10 @@ func TestResolveOIDCUser_UsernameDedupeWhenLinkingOff(t *testing.T) {
 	cfg.LinkByUsername = false
 	cfg.LinkByEmail = false
 	ah, db := newOIDCHandler(t, cfg, nil)
-	if _, err := db.CreateUser("erin", "hash", false); err != nil {
+	if _, err := db.CreateUser(t.Context(), "erin", "hash", false); err != nil {
 		t.Fatal(err)
 	}
-	u, err := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s-erin", Username: "erin"})
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s-erin", Username: "erin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +343,7 @@ func TestResolveOIDCUser_SignupDisabled(t *testing.T) {
 	cfg.LinkByEmail = false
 	cfg.LinkByUsername = false
 	ah, _ := newOIDCHandler(t, cfg, nil)
-	_, err := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s-none", Username: "ghost"})
+	_, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s-none", Username: "ghost"})
 	if err == nil || err.Error() != "signup_disabled" {
 		t.Fatalf("expected signup_disabled, got %v", err)
 	}
@@ -328,22 +354,22 @@ func TestResolveOIDCUser_AdminGroupSync(t *testing.T) {
 	cfg.AdminGroup = "montly-admins"
 	ah, db := newOIDCHandler(t, cfg, nil)
 	// Pre-existing non-admin, already linked.
-	linked, _ := db.CreateOIDCUser("frank", "frank@x", "https://idp.example", "s-frank", false)
+	linked, _ := db.CreateOIDCUser(t.Context(), "frank", "frank@x", "https://idp.example", "s-frank", false)
 
 	// Login with the admin group → promoted.
-	u, err := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s-frank", Username: "frank", Groups: []string{"montly-admins"}})
+	u, err := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s-frank", Username: "frank", Groups: []string{"montly-admins"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !u.IsAdmin {
 		t.Error("should be promoted to admin")
 	}
-	if got, _, _ := db.GetUserByOIDC("https://idp.example", "s-frank"); !got.IsAdmin {
+	if got, _, _ := db.GetUserByOIDC(t.Context(), "https://idp.example", "s-frank"); !got.IsAdmin {
 		t.Error("admin flag not persisted")
 	}
 
 	// Login again without the group → demoted.
-	u2, _ := ah.resolveOIDCUser(&OIDCClaims{Issuer: "https://idp.example", Subject: "s-frank", Username: "frank", Groups: []string{"users"}})
+	u2, _ := ah.resolveOIDCUser(t.Context(), &OIDCClaims{Issuer: "https://idp.example", Subject: "s-frank", Username: "frank", Groups: []string{"users"}})
 	if u2.IsAdmin {
 		t.Error("should be demoted when no longer in admin group")
 	}
@@ -436,7 +462,7 @@ func TestOIDCCallbackSuccess(t *testing.T) {
 	if !hasSession {
 		t.Error("session cookie not set")
 	}
-	if _, found, _ := db.GetUserByOIDC("https://idp.example", "s1"); !found {
+	if _, found, _ := db.GetUserByOIDC(t.Context(), "https://idp.example", "s1"); !found {
 		t.Error("user not provisioned")
 	}
 }

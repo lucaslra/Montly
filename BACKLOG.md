@@ -1,6 +1,6 @@
 # Backlog
 
-Last updated: 2026-08-05 (reviewed against code at v0.24.1 — added OIDC follow-ups)
+Last updated: 2026-08-23 (all prior P2 items resolved)
 
 > Many items from the earlier deep audit have since shipped (see CHANGELOG 0.16.0–0.24.1).
 > This list contains only what is **genuinely open**, verified against the current codebase.
@@ -17,12 +17,13 @@ WAL + `synchronous=NORMAL` + `foreign_keys` pragmas (`db.go`), digest goroutine 
 
 ## P2 — Next sprint
 
-- [ ] **OIDC startup resilience** — `newRealOIDCProvider` performs OIDC discovery at boot and `log.Fatalf`s on failure (`main.go`). A transient IdP outage crash-loops the whole app and locks out password users too. Make discovery lazy/retryable, or degrade to password-only with a warning when the issuer is unreachable at startup. (`backend/oidc.go`, `backend/main.go`)
-- [ ] **Webhook retry logic** — transient 5xx drops events silently. Add 3-attempt exponential backoff with jitter in `FireWebhooks` and `FireMonthDigest`. (`backend/webhooks.go`)
-- [ ] **Context propagation to DB** — no `context.Context` passed to any DB query (incl. the new OIDC lookups); cancelled requests keep DB work alive. Use `QueryContext`/`ExecContext` throughout `db.go` / `oidc.go`.
-- [ ] **Audit log goroutine leak** — 18 `go h.db.InsertAuditLog(...)` call sites (now incl. `login_oidc`); if the DB is locked, goroutines accumulate. Use a bounded fire-and-forget queue. (`backend/handlers.go`, `backend/oidc.go`)
-- [ ] **N+1 in FireMonthDigest** — 2 sequential queries per user in a loop (`GetWebhooksForUser` + `GetTasks`). Batch with a single query joining users × hooks. (`backend/webhooks.go`)
-- [ ] **Extend rate limiting to remaining auth endpoints** — `Login`, `Setup`, and `ChangePassword` are rate-limited, but admin `POST /api/users` (`CreateUser`) and the OIDC `GET /auth/oidc/login` + `GET /auth/oidc/callback` are not. The callback triggers an outbound token exchange to the IdP, so an unthrottled endpoint is a mild abuse/DoS vector. (`backend/auth.go`, `backend/oidc.go`)
+_None currently open._ All prior P2 items are resolved:
+- **OIDC startup resilience** — discovery now runs via `lazyOIDCProvider` (`oidc.go`), retrying with exponential backoff in the background instead of `log.Fatalf`ing at boot. `AuthCodeURL` returns `""` until discovery succeeds; `OIDCLogin` turns that into a 503 rather than a broken redirect.
+- **Webhook retry logic** — `deliverWebhook` (`webhooks.go`) retries up to 3 attempts with exponential backoff + jitter on network errors and 5xx; 4xx is not retried. Shared by `FireWebhooks` and `FireMonthDigest`.
+- **Context propagation to DB** — all 62 DB-touching methods in `db.go` now take `context.Context` and use `QueryContext`/`ExecContext`/`BeginTx`, threaded from `r.Context()` through every handler (including the OIDC resolution chain). Fire-and-forget paths (audit queue, `UpdateTokenLastUsed`, `FireWebhooks`) use `context.WithoutCancel` so they aren't killed when the request returns.
+- **Audit log goroutine leak** — replaced with a bounded `AuditQueue` (`audit.go`, capacity 256) fed by a single worker goroutine; a full queue drops (and logs) an entry rather than blocking the handler.
+- **N+1 in FireMonthDigest** — `GetMonthDigestWebhooks` fetches all `month.digest`-subscribed webhooks in one query, grouped by user in Go; `GetTasks` is still called per-user (unavoidable given per-user interval/share resolution) but only for users who actually have a digest webhook.
+- **Extend rate limiting to remaining auth endpoints** — `CreateUser`, `OIDCLogin`, and `OIDCCallback` now check the shared `RateLimiter`. OIDC failures (not successes) count against it, via `redirectAuthError`, so legitimate repeat SSO logins never accumulate failures.
 
 ## P3 — Polish / low priority
 

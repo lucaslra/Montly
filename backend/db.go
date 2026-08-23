@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -159,8 +160,8 @@ func initDB(dsn, driver string) (*DB, error) {
 	if driver != "postgres" {
 		// WAL mode allows concurrent readers alongside the writer; synchronous=NORMAL
 		// is safe with WAL and gives a meaningful durability/throughput improvement.
-		db.Exec("PRAGMA journal_mode=WAL")    //nolint:errcheck
-		db.Exec("PRAGMA synchronous=NORMAL")  //nolint:errcheck
+		db.Exec("PRAGMA journal_mode=WAL")   //nolint:errcheck
+		db.Exec("PRAGMA synchronous=NORMAL") //nolint:errcheck
 	}
 
 	var migrateErr error
@@ -363,8 +364,8 @@ func migrate(db *sql.DB) error {
 	db.QueryRow(`SELECT "notnull" FROM pragma_table_info('tasks') WHERE name='start_date'`).Scan(&notNull)
 	if notNull == 1 {
 		log.Printf("migration: rebuilding tasks table (converting date columns to nullable)")
-		db.Exec(`PRAGMA foreign_keys = OFF`)           //nolint:errcheck
-		defer db.Exec(`PRAGMA foreign_keys = ON`)       //nolint:errcheck
+		db.Exec(`PRAGMA foreign_keys = OFF`)      //nolint:errcheck
+		defer db.Exec(`PRAGMA foreign_keys = ON`) //nolint:errcheck
 		tx, err := db.Begin()
 		if err != nil {
 			return fmt.Errorf("begin tasks rebuild tx: %w", err)
@@ -407,8 +408,8 @@ func migrate(db *sql.DB) error {
 	db.QueryRow(`SELECT "table" FROM pragma_foreign_key_list('completions') LIMIT 1`).Scan(&fkTable)
 	if fkTable == "tasks_old" {
 		log.Printf("migration: repairing completions foreign key (was pointing to tasks_old)")
-		db.Exec(`PRAGMA foreign_keys = OFF`)           //nolint:errcheck
-		defer db.Exec(`PRAGMA foreign_keys = ON`)       //nolint:errcheck
+		db.Exec(`PRAGMA foreign_keys = OFF`)      //nolint:errcheck
+		defer db.Exec(`PRAGMA foreign_keys = ON`) //nolint:errcheck
 		tx, err := db.Begin()
 		if err != nil {
 			return fmt.Errorf("begin completions repair tx: %w", err)
@@ -499,14 +500,14 @@ func migrate(db *sql.DB) error {
 // (key PRIMARY KEY) schema to the new (user_id, key PRIMARY KEY) schema.
 // It is idempotent: if the migration has already run, it returns nil immediately.
 // Must be called after the first admin user exists.
-func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
+func (db *DB) MigrateSettingsToUserScoped(ctx context.Context, adminID int64) error {
 	// Check if user_id column already exists.
 	var hasUserID int
 	var row *sql.Row
 	if db.driver == "postgres" {
-		row = db.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_name='settings' AND column_name='user_id'`)
+		row = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_name='settings' AND column_name='user_id'`)
 	} else {
-		row = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='user_id'`)
+		row = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name='user_id'`)
 	}
 	if err := row.Scan(&hasUserID); err != nil {
 		return fmt.Errorf("check settings schema: %w", err)
@@ -520,15 +521,15 @@ func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 	insertStmt := db.q(`INSERT INTO settings SELECT ?, key, value FROM settings_old`)
 
 	if db.driver == "postgres" {
-		tx, err := db.Begin()
+		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback() //nolint:errcheck
-		if _, err := tx.Exec(`ALTER TABLE settings RENAME TO settings_old`); err != nil {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE settings RENAME TO settings_old`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`CREATE TABLE settings (
+		if _, err := tx.ExecContext(ctx, `CREATE TABLE settings (
 			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			key     TEXT   NOT NULL,
 			value   TEXT   NOT NULL DEFAULT '',
@@ -536,28 +537,28 @@ func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 		)`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(insertStmt, adminID); err != nil {
+		if _, err := tx.ExecContext(ctx, insertStmt, adminID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`DROP TABLE settings_old`); err != nil {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE settings_old`); err != nil {
 			return err
 		}
 		return tx.Commit()
 	}
 
 	// SQLite: must disable FK enforcement during table rename.
-	db.Exec(`PRAGMA foreign_keys = OFF`)
-	defer db.Exec(`PRAGMA foreign_keys = ON`)
+	db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
+	defer db.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`ALTER TABLE settings RENAME TO settings_old`); err != nil {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE settings RENAME TO settings_old`); err != nil {
 		tx.Rollback()
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE settings (
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE settings (
 		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		key     TEXT    NOT NULL,
 		value   TEXT    NOT NULL DEFAULT '',
@@ -566,11 +567,11 @@ func (db *DB) MigrateSettingsToUserScoped(adminID int64) error {
 		tx.Rollback()
 		return err
 	}
-	if _, err := tx.Exec(insertStmt, adminID); err != nil {
+	if _, err := tx.ExecContext(ctx, insertStmt, adminID); err != nil {
 		tx.Rollback()
 		return err
 	}
-	if _, err := tx.Exec(`DROP TABLE settings_old`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DROP TABLE settings_old`); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -589,8 +590,8 @@ var defaultSettings = map[string]string{
 	"number_format":     "en",
 }
 
-func (db *DB) GetSettings(userID int64) (map[string]string, error) {
-	rows, err := db.Query(db.q(`SELECT key, value FROM settings WHERE user_id = ?`), userID)
+func (db *DB) GetSettings(ctx context.Context, userID int64) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, db.q(`SELECT key, value FROM settings WHERE user_id = ?`), userID)
 	if err != nil {
 		return nil, err
 	}
@@ -611,8 +612,8 @@ func (db *DB) GetSettings(userID int64) (map[string]string, error) {
 	return result, rows.Err()
 }
 
-func (db *DB) SaveSettings(userID int64, settings map[string]string) error {
-	tx, err := db.Begin()
+func (db *DB) SaveSettings(ctx context.Context, userID int64, settings map[string]string) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -708,7 +709,7 @@ func (db *DB) intervalCheckExprForAlias(alias string) string {
 	return "(? - (CAST(SUBSTR(" + es + ", 1, 4) AS INTEGER) * 12 + CAST(SUBSTR(" + es + ", 6, 2) AS INTEGER) - 1)) % " + p + "interval = 0"
 }
 
-func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
+func (db *DB) GetTasks(ctx context.Context, month string, userID int64) ([]Task, error) {
 	mi := monthIndex(month)
 	es := "COALESCE(NULLIF(start_date,''), " + db.ymExpr("created_at") + ")"
 	esT := "COALESCE(NULLIF(t.start_date,''), " + db.ymExpr("t.created_at") + ")"
@@ -730,7 +731,7 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 		  AND t.archived_at IS NULL
 		  AND ` + db.intervalCheckExprForAlias("t") + `
 		ORDER BY created_at ASC`
-	rows, err := db.Query(db.q(query), month, month, userID, mi, month, month, userID, mi)
+	rows, err := db.QueryContext(ctx, db.q(query), month, month, userID, mi, month, month, userID, mi)
 	if err != nil {
 		return nil, err
 	}
@@ -769,14 +770,14 @@ func (db *DB) GetTasks(month string, userID int64) ([]Task, error) {
 	return tasks, rows.Err()
 }
 
-func (db *DB) GetTaskByID(id int64) (Task, error) {
-	return scanTask(db.QueryRow(db.q(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`), id))
+func (db *DB) GetTaskByID(ctx context.Context, id int64) (Task, error) {
+	return scanTask(db.QueryRowContext(ctx, db.q(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`), id))
 }
 
 // GetReportData fetches tasks and completions for the given history and forecast months
 // using two database queries, then groups the results per month in memory.
 // historyMonths and forecastMonths must be sorted ascending YYYY-MM strings.
-func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string) ([]ReportMonth, error) {
+func (db *DB) GetReportData(ctx context.Context, userID int64, historyMonths, forecastMonths []string) ([]ReportMonth, error) {
 	allMonths := make([]string, 0, len(historyMonths)+len(forecastMonths))
 	allMonths = append(allMonths, historyMonths...)
 	allMonths = append(allMonths, forecastMonths...)
@@ -788,7 +789,7 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 
 	// 1. All tasks potentially active in [minMonth, maxMonth] — owned or shared.
 	es := "COALESCE(NULLIF(start_date,''), " + db.ymExpr("created_at") + ")"
-	taskRows, err := db.Query(
+	taskRows, err := db.QueryContext(ctx,
 		db.q(`SELECT `+taskColumns+` FROM tasks
 		 WHERE `+es+` <= ?
 		   AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
@@ -836,7 +837,7 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 	// 2. Completions for the history range (forecast months have none yet).
 	compsByMonth := make(map[string][]Completion)
 	if len(historyMonths) > 0 {
-		compRows, err := db.Query(
+		compRows, err := db.QueryContext(ctx,
 			db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note, c.skipped
 			 FROM completions c
 			 JOIN tasks t ON t.id = c.task_id
@@ -893,8 +894,8 @@ func (db *DB) GetReportData(userID int64, historyMonths, forecastMonths []string
 	return result, nil
 }
 
-func (db *DB) GetReceiptsForTask(taskID int64) ([]string, error) {
-	rows, err := db.Query(
+func (db *DB) GetReceiptsForTask(ctx context.Context, taskID int64) ([]string, error) {
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT receipt_file FROM completions WHERE task_id = ? AND receipt_file != ''`),
 		taskID,
 	)
@@ -913,7 +914,7 @@ func (db *DB) GetReceiptsForTask(taskID int64) ([]string, error) {
 	return files, rows.Err()
 }
 
-func (db *DB) CreateTask(title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, userID int64, interval int) (Task, error) {
+func (db *DB) CreateTask(ctx context.Context, title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, userID int64, interval int) (Task, error) {
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
 	}
@@ -930,7 +931,7 @@ func (db *DB) CreateTask(title, description, taskType, startDate, endDate, amoun
 
 	var id int64
 	if db.driver == "postgres" {
-		err := db.QueryRow(
+		err := db.QueryRowContext(ctx,
 			db.q(`INSERT INTO tasks (title, description, type, metadata, start_date, end_date, user_id, interval, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`),
 			title, description, taskType, string(metadata), sd, ed, userID, interval, amount,
 		).Scan(&id)
@@ -938,7 +939,7 @@ func (db *DB) CreateTask(title, description, taskType, startDate, endDate, amoun
 			return Task{}, err
 		}
 	} else {
-		res, err := db.Exec(
+		res, err := db.ExecContext(ctx,
 			db.q(`INSERT INTO tasks (title, description, type, metadata, start_date, end_date, user_id, interval, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 			title, description, taskType, string(metadata), sd, ed, userID, interval, amount,
 		)
@@ -950,13 +951,13 @@ func (db *DB) CreateTask(title, description, taskType, startDate, endDate, amoun
 			return Task{}, err
 		}
 	}
-	return db.GetTaskByID(id)
+	return db.GetTaskByID(ctx, id)
 }
 
 // UpdateTaskWithAmountBackfill updates a task and, when the amount changes,
 // stamps the previous amount onto past completions that held no per-completion override
-// (amount = ''). This preserves historical accuracy.
-func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, interval int) (Task, error) {
+// (amount = ”). This preserves historical accuracy.
+func (db *DB) UpdateTaskWithAmountBackfill(ctx context.Context, id int64, title, description, taskType, startDate, endDate, amount string, metadata json.RawMessage, interval int) (Task, error) {
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
 	}
@@ -971,18 +972,18 @@ func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskTyp
 		ed = &endDate
 	}
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return Task{}, err
 	}
 	defer tx.Rollback()
 
 	var oldAmount string
-	if err := tx.QueryRow(db.q(`SELECT amount FROM tasks WHERE id = ?`), id).Scan(&oldAmount); err != nil {
+	if err := tx.QueryRowContext(ctx, db.q(`SELECT amount FROM tasks WHERE id = ?`), id).Scan(&oldAmount); err != nil {
 		return Task{}, err
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		db.q(`UPDATE tasks SET title = ?, description = ?, type = ?, metadata = ?, start_date = ?, end_date = ?, interval = ?, amount = ? WHERE id = ?`),
 		title, description, taskType, string(metadata), sd, ed, interval, amount, id,
 	); err != nil {
@@ -990,7 +991,7 @@ func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskTyp
 	}
 
 	if oldAmount != "" && amount != oldAmount {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			db.q(`UPDATE completions SET amount = ? WHERE task_id = ? AND (amount = '' OR amount IS NULL)`),
 			oldAmount, id,
 		); err != nil {
@@ -1001,27 +1002,27 @@ func (db *DB) UpdateTaskWithAmountBackfill(id int64, title, description, taskTyp
 	if err := tx.Commit(); err != nil {
 		return Task{}, err
 	}
-	return db.GetTaskByID(id)
+	return db.GetTaskByID(ctx, id)
 }
 
-func (db *DB) DeleteTask(id int64) error {
-	_, err := db.Exec(db.q(`DELETE FROM tasks WHERE id = ?`), id)
+func (db *DB) DeleteTask(ctx context.Context, id int64) error {
+	_, err := db.ExecContext(ctx, db.q(`DELETE FROM tasks WHERE id = ?`), id)
 	return err
 }
 
-func (db *DB) ArchiveTask(id int64) error {
-	_, err := db.Exec(db.q(`UPDATE tasks SET archived_at = ? WHERE id = ?`),
+func (db *DB) ArchiveTask(ctx context.Context, id int64) error {
+	_, err := db.ExecContext(ctx, db.q(`UPDATE tasks SET archived_at = ? WHERE id = ?`),
 		time.Now().UTC().Format("2006-01-02T15:04:05Z"), id)
 	return err
 }
 
-func (db *DB) UnarchiveTask(id int64) error {
-	_, err := db.Exec(db.q(`UPDATE tasks SET archived_at = NULL WHERE id = ?`), id)
+func (db *DB) UnarchiveTask(ctx context.Context, id int64) error {
+	_, err := db.ExecContext(ctx, db.q(`UPDATE tasks SET archived_at = NULL WHERE id = ?`), id)
 	return err
 }
 
-func (db *DB) GetArchivedTasks(userID int64) ([]Task, error) {
-	rows, err := db.Query(
+func (db *DB) GetArchivedTasks(ctx context.Context, userID int64) ([]Task, error) {
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT `+taskColumns+` FROM tasks WHERE user_id = ? AND archived_at IS NOT NULL ORDER BY archived_at DESC`),
 		userID,
 	)
@@ -1075,8 +1076,8 @@ func scanCompletion(row *sql.Row) (Completion, bool, error) {
 }
 
 // GetCompletions returns completions for a given month that the user can access (owned or shared tasks).
-func (db *DB) GetCompletions(month string, userID int64) ([]Completion, error) {
-	rows, err := db.Query(
+func (db *DB) GetCompletions(ctx context.Context, month string, userID int64) ([]Completion, error) {
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT c.task_id, c.month, c.completed_at, c.receipt_file, c.amount, c.note, c.skipped
 		 FROM completions c
 		 JOIN tasks t ON t.id = c.task_id
@@ -1100,23 +1101,23 @@ func (db *DB) GetCompletions(month string, userID int64) ([]Completion, error) {
 	return completions, rows.Err()
 }
 
-func (db *DB) GetCompletion(taskID int64, month string) (Completion, bool, error) {
-	return scanCompletion(db.QueryRow(
+func (db *DB) GetCompletion(ctx context.Context, taskID int64, month string) (Completion, bool, error) {
+	return scanCompletion(db.QueryRowContext(ctx,
 		db.q(`SELECT `+completionColumns+` FROM completions WHERE task_id = ? AND month = ?`),
 		taskID, month,
 	))
 }
 
-func (db *DB) AddCompletion(taskID int64, month string) (Completion, error) {
-	if _, err := db.Exec(db.q(`INSERT INTO completions (task_id, month) VALUES (?, ?)`), taskID, month); err != nil {
+func (db *DB) AddCompletion(ctx context.Context, taskID int64, month string) (Completion, error) {
+	if _, err := db.ExecContext(ctx, db.q(`INSERT INTO completions (task_id, month) VALUES (?, ?)`), taskID, month); err != nil {
 		return Completion{}, err
 	}
-	c, _, err := db.GetCompletion(taskID, month)
+	c, _, err := db.GetCompletion(ctx, taskID, month)
 	return c, err
 }
 
-func (db *DB) RemoveCompletion(taskID int64, month string) error {
-	_, err := db.Exec(db.q(`DELETE FROM completions WHERE task_id = ? AND month = ?`), taskID, month)
+func (db *DB) RemoveCompletion(ctx context.Context, taskID int64, month string) error {
+	_, err := db.ExecContext(ctx, db.q(`DELETE FROM completions WHERE task_id = ? AND month = ?`), taskID, month)
 	return err
 }
 
@@ -1124,8 +1125,8 @@ func (db *DB) RemoveCompletion(taskID int64, month string) error {
 // - No row → inserts a skipped row; returns (completion, true, nil).
 // - Row with skipped=1 → removes the row (back to pending); returns (Completion{}, false, nil).
 // - Row with skipped=0 → returns an error (task is completed, not pending).
-func (db *DB) SkipCompletion(taskID int64, month string) (Completion, bool, error) {
-	existing, found, err := db.GetCompletion(taskID, month)
+func (db *DB) SkipCompletion(ctx context.Context, taskID int64, month string) (Completion, bool, error) {
+	existing, found, err := db.GetCompletion(ctx, taskID, month)
 	if err != nil {
 		return Completion{}, false, err
 	}
@@ -1133,72 +1134,72 @@ func (db *DB) SkipCompletion(taskID int64, month string) (Completion, bool, erro
 		return Completion{}, false, ErrAlreadyCompleted
 	}
 	if found && existing.Skipped {
-		if _, err := db.Exec(db.q(`DELETE FROM completions WHERE task_id = ? AND month = ?`), taskID, month); err != nil {
+		if _, err := db.ExecContext(ctx, db.q(`DELETE FROM completions WHERE task_id = ? AND month = ?`), taskID, month); err != nil {
 			return Completion{}, false, err
 		}
 		return Completion{}, false, nil
 	}
-	if _, err := db.Exec(db.q(`INSERT INTO completions (task_id, month, skipped) VALUES (?, ?, 1)`), taskID, month); err != nil {
+	if _, err := db.ExecContext(ctx, db.q(`INSERT INTO completions (task_id, month, skipped) VALUES (?, ?, 1)`), taskID, month); err != nil {
 		return Completion{}, false, err
 	}
-	c, _, err := db.GetCompletion(taskID, month)
+	c, _, err := db.GetCompletion(ctx, taskID, month)
 	return c, true, err
 }
 
 // CompleteSkipped updates a skipped completion to mark it as completed (skipped=0).
-func (db *DB) CompleteSkipped(taskID int64, month string) (Completion, error) {
+func (db *DB) CompleteSkipped(ctx context.Context, taskID int64, month string) (Completion, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := db.Exec(
+	if _, err := db.ExecContext(ctx,
 		db.q(`UPDATE completions SET skipped = 0, completed_at = ? WHERE task_id = ? AND month = ?`),
 		now, taskID, month,
 	); err != nil {
 		return Completion{}, err
 	}
-	c, _, err := db.GetCompletion(taskID, month)
+	c, _, err := db.GetCompletion(ctx, taskID, month)
 	return c, err
 }
 
-func (db *DB) SetCompletionReceipt(taskID int64, month, filename string) (Completion, error) {
-	if _, err := db.Exec(
+func (db *DB) SetCompletionReceipt(ctx context.Context, taskID int64, month, filename string) (Completion, error) {
+	if _, err := db.ExecContext(ctx,
 		db.q(`UPDATE completions SET receipt_file = ? WHERE task_id = ? AND month = ?`),
 		filename, taskID, month,
 	); err != nil {
 		return Completion{}, err
 	}
-	c, _, err := db.GetCompletion(taskID, month)
+	c, _, err := db.GetCompletion(ctx, taskID, month)
 	return c, err
 }
 
-func (db *DB) ClearCompletionReceipt(taskID int64, month string) (Completion, error) {
-	if _, err := db.Exec(
+func (db *DB) ClearCompletionReceipt(ctx context.Context, taskID int64, month string) (Completion, error) {
+	if _, err := db.ExecContext(ctx,
 		db.q(`UPDATE completions SET receipt_file = '' WHERE task_id = ? AND month = ?`),
 		taskID, month,
 	); err != nil {
 		return Completion{}, err
 	}
-	c, _, err := db.GetCompletion(taskID, month)
+	c, _, err := db.GetCompletion(ctx, taskID, month)
 	return c, err
 }
 
-func (db *DB) SetCompletionAmount(taskID int64, month, amount string) (Completion, error) {
-	if _, err := db.Exec(
+func (db *DB) SetCompletionAmount(ctx context.Context, taskID int64, month, amount string) (Completion, error) {
+	if _, err := db.ExecContext(ctx,
 		db.q(`UPDATE completions SET amount = ? WHERE task_id = ? AND month = ?`),
 		amount, taskID, month,
 	); err != nil {
 		return Completion{}, err
 	}
-	c, _, err := db.GetCompletion(taskID, month)
+	c, _, err := db.GetCompletion(ctx, taskID, month)
 	return c, err
 }
 
-func (db *DB) SetCompletionNote(taskID int64, month, note string) (Completion, error) {
-	if _, err := db.Exec(
+func (db *DB) SetCompletionNote(ctx context.Context, taskID int64, month, note string) (Completion, error) {
+	if _, err := db.ExecContext(ctx,
 		db.q(`UPDATE completions SET note = ? WHERE task_id = ? AND month = ?`),
 		note, taskID, month,
 	); err != nil {
 		return Completion{}, err
 	}
-	c, _, err := db.GetCompletion(taskID, month)
+	c, _, err := db.GetCompletion(ctx, taskID, month)
 	return c, err
 }
 
@@ -1213,8 +1214,8 @@ type ExportRow struct {
 }
 
 // GetCompletionsForExport returns all completions in the [from, to] month range for the user.
-func (db *DB) GetCompletionsForExport(userID int64, from, to string) ([]ExportRow, error) {
-	rows, err := db.Query(
+func (db *DB) GetCompletionsForExport(ctx context.Context, userID int64, from, to string) ([]ExportRow, error) {
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT t.title, t.type, c.month, c.amount, c.receipt_file, c.skipped
 		 FROM completions c
 		 JOIN tasks t ON t.id = c.task_id
@@ -1267,8 +1268,8 @@ type ImportResult struct {
 // Tasks are matched by (title, type, user_id); a minimal task is created when no
 // match is found. Completions are inserted or updated (amount + skipped status);
 // existing receipt_file and note fields are never touched.
-func (db *DB) ImportCompletionsCSV(userID int64, rows []ImportRow) (ImportResult, error) {
-	tx, err := db.Begin()
+func (db *DB) ImportCompletionsCSV(ctx context.Context, userID int64, rows []ImportRow) (ImportResult, error) {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -1282,20 +1283,20 @@ func (db *DB) ImportCompletionsCSV(userID int64, rows []ImportRow) (ImportResult
 		taskID, cached := taskCache[cacheKey]
 		if !cached {
 			var id int64
-			err := tx.QueryRow(
+			err := tx.QueryRowContext(ctx,
 				db.q(`SELECT id FROM tasks WHERE user_id = ? AND title = ? AND type = ?`),
 				userID, row.Title, row.Type,
 			).Scan(&id)
 			if err == sql.ErrNoRows {
 				// Create a minimal placeholder task.
 				if db.driver == "postgres" {
-					err = tx.QueryRow(
+					err = tx.QueryRowContext(ctx,
 						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval, start_date) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`),
 						row.Title, "", row.Type, "{}", userID, 1, row.Month,
 					).Scan(&id)
 				} else {
 					var res sql.Result
-					res, err = tx.Exec(
+					res, err = tx.ExecContext(ctx,
 						db.q(`INSERT INTO tasks (title, description, type, metadata, user_id, interval, start_date) VALUES (?, ?, ?, ?, ?, ?, ?)`),
 						row.Title, "", row.Type, "{}", userID, 1, row.Month,
 					)
@@ -1320,7 +1321,7 @@ func (db *DB) ImportCompletionsCSV(userID int64, rows []ImportRow) (ImportResult
 		}
 
 		var existingCount int
-		if err := tx.QueryRow(
+		if err := tx.QueryRowContext(ctx,
 			db.q(`SELECT COUNT(*) FROM completions WHERE task_id = ? AND month = ?`),
 			taskID, row.Month,
 		).Scan(&existingCount); err != nil {
@@ -1332,7 +1333,7 @@ func (db *DB) ImportCompletionsCSV(userID int64, rows []ImportRow) (ImportResult
 			if row.Status == "completed" {
 				completedAt = time.Now().UTC().Format(time.RFC3339)
 			}
-			if _, err := tx.Exec(
+			if _, err := tx.ExecContext(ctx,
 				db.q(`INSERT INTO completions (task_id, month, amount, skipped, completed_at) VALUES (?, ?, ?, ?, ?)`),
 				taskID, row.Month, row.Amount, skipped, completedAt,
 			); err != nil {
@@ -1340,7 +1341,7 @@ func (db *DB) ImportCompletionsCSV(userID int64, rows []ImportRow) (ImportResult
 			}
 			result.CompletionsCreated++
 		} else {
-			if _, err := tx.Exec(
+			if _, err := tx.ExecContext(ctx,
 				db.q(`UPDATE completions SET amount = ?, skipped = ? WHERE task_id = ? AND month = ?`),
 				row.Amount, skipped, taskID, row.Month,
 			); err != nil {
@@ -1370,32 +1371,32 @@ func scanUser(row *sql.Row) (User, error) {
 	return u, nil
 }
 
-func (db *DB) CountUsers() (int, error) {
+func (db *DB) CountUsers(ctx context.Context) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
 }
 
-func (db *DB) CountAdmins() (int, error) {
+func (db *DB) CountAdmins(ctx context.Context) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE is_admin = 1`).Scan(&n)
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE is_admin = 1`).Scan(&n)
 	return n, err
 }
 
-func (db *DB) CountTasksForUser(userID int64) (int, error) {
+func (db *DB) CountTasksForUser(ctx context.Context, userID int64) (int, error) {
 	var n int
-	err := db.QueryRow(db.q(`SELECT COUNT(*) FROM tasks WHERE user_id = ?`), userID).Scan(&n)
+	err := db.QueryRowContext(ctx, db.q(`SELECT COUNT(*) FROM tasks WHERE user_id = ?`), userID).Scan(&n)
 	return n, err
 }
 
-func (db *DB) CreateUser(username, passwordHash string, isAdmin bool) (User, error) {
+func (db *DB) CreateUser(ctx context.Context, username, passwordHash string, isAdmin bool) (User, error) {
 	isAdminInt := 0
 	if isAdmin {
 		isAdminInt = 1
 	}
 	var id int64
 	if db.driver == "postgres" {
-		err := db.QueryRow(
+		err := db.QueryRowContext(ctx,
 			db.q(`INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?) RETURNING id`),
 			username, passwordHash, isAdminInt,
 		).Scan(&id)
@@ -1403,7 +1404,7 @@ func (db *DB) CreateUser(username, passwordHash string, isAdmin bool) (User, err
 			return User{}, err
 		}
 	} else {
-		res, err := db.Exec(
+		res, err := db.ExecContext(ctx,
 			db.q(`INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)`),
 			username, passwordHash, isAdminInt,
 		)
@@ -1415,23 +1416,23 @@ func (db *DB) CreateUser(username, passwordHash string, isAdmin bool) (User, err
 			return User{}, err
 		}
 	}
-	return db.GetUserByID(id)
+	return db.GetUserByID(ctx, id)
 }
 
-func (db *DB) GetUserByID(id int64) (User, error) {
-	return scanUser(db.QueryRow(db.q(`SELECT `+userColumns+` FROM users WHERE id = ?`), id))
+func (db *DB) GetUserByID(ctx context.Context, id int64) (User, error) {
+	return scanUser(db.QueryRowContext(ctx, db.q(`SELECT `+userColumns+` FROM users WHERE id = ?`), id))
 }
 
-func (db *DB) GetUserByUsername(username string) (User, error) {
-	return scanUser(db.QueryRow(db.q(`SELECT `+userColumns+` FROM users WHERE username = ?`), username))
+func (db *DB) GetUserByUsername(ctx context.Context, username string) (User, error) {
+	return scanUser(db.QueryRowContext(ctx, db.q(`SELECT `+userColumns+` FROM users WHERE username = ?`), username))
 }
 
-func (db *DB) GetFirstAdmin() (User, error) {
-	return scanUser(db.QueryRow(`SELECT ` + userColumns + ` FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1`))
+func (db *DB) GetFirstAdmin(ctx context.Context) (User, error) {
+	return scanUser(db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1`))
 }
 
-func (db *DB) ListUsers() ([]User, error) {
-	rows, err := db.Query(`SELECT ` + userColumns + ` FROM users ORDER BY created_at ASC`)
+func (db *DB) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1449,20 +1450,20 @@ func (db *DB) ListUsers() ([]User, error) {
 	return users, rows.Err()
 }
 
-func (db *DB) DeleteUser(id int64) error {
-	_, err := db.Exec(db.q(`DELETE FROM users WHERE id = ?`), id)
+func (db *DB) DeleteUser(ctx context.Context, id int64) error {
+	_, err := db.ExecContext(ctx, db.q(`DELETE FROM users WHERE id = ?`), id)
 	return err
 }
 
-func (db *DB) UpdateUserPassword(userID int64, newHash string) error {
-	_, err := db.Exec(db.q(`UPDATE users SET password_hash = ? WHERE id = ?`), newHash, userID)
+func (db *DB) UpdateUserPassword(ctx context.Context, userID int64, newHash string) error {
+	_, err := db.ExecContext(ctx, db.q(`UPDATE users SET password_hash = ? WHERE id = ?`), newHash, userID)
 	return err
 }
 
 // AssignOrphanedTasks assigns all tasks with no user_id to the given user.
 // Called once after the first admin is created.
-func (db *DB) AssignOrphanedTasks(adminID int64) error {
-	_, err := db.Exec(db.q(`UPDATE tasks SET user_id = ? WHERE user_id IS NULL`), adminID)
+func (db *DB) AssignOrphanedTasks(ctx context.Context, adminID int64) error {
+	_, err := db.ExecContext(ctx, db.q(`UPDATE tasks SET user_id = ? WHERE user_id IS NULL`), adminID)
 	return err
 }
 
@@ -1495,8 +1496,8 @@ func scanOIDCUser(row *sql.Row) (User, bool, error) {
 }
 
 // GetUserByOIDC returns the user linked to the given (issuer, subject) pair, if any.
-func (db *DB) GetUserByOIDC(issuer, subject string) (User, bool, error) {
-	return scanOIDCUser(db.QueryRow(
+func (db *DB) GetUserByOIDC(ctx context.Context, issuer, subject string) (User, bool, error) {
+	return scanOIDCUser(db.QueryRowContext(ctx,
 		db.q(`SELECT `+oidcUserColumns+` FROM users WHERE oidc_issuer = ? AND oidc_subject = ?`),
 		issuer, subject,
 	))
@@ -1504,16 +1505,16 @@ func (db *DB) GetUserByOIDC(issuer, subject string) (User, bool, error) {
 
 // GetUserByEmail returns the (lowest-id) user with the given non-empty email, if any.
 // Used for account linking; callers must ensure email is non-empty.
-func (db *DB) GetUserByEmail(email string) (User, bool, error) {
-	return scanOIDCUser(db.QueryRow(
+func (db *DB) GetUserByEmail(ctx context.Context, email string) (User, bool, error) {
+	return scanOIDCUser(db.QueryRowContext(ctx,
 		db.q(`SELECT `+oidcUserColumns+` FROM users WHERE email = ? ORDER BY id ASC LIMIT 1`),
 		email,
 	))
 }
 
 // GetUserByUsernameFull returns the user with the given username plus OIDC/email fields.
-func (db *DB) GetUserByUsernameFull(username string) (User, bool, error) {
-	return scanOIDCUser(db.QueryRow(
+func (db *DB) GetUserByUsernameFull(ctx context.Context, username string) (User, bool, error) {
+	return scanOIDCUser(db.QueryRowContext(ctx,
 		db.q(`SELECT `+oidcUserColumns+` FROM users WHERE username = ?`),
 		username,
 	))
@@ -1521,18 +1522,18 @@ func (db *DB) GetUserByUsernameFull(username string) (User, bool, error) {
 
 // LinkOIDCIdentity stamps an (issuer, subject) pair onto an existing user, and
 // records the email when provided (never wipes an existing email).
-func (db *DB) LinkOIDCIdentity(userID int64, issuer, subject, email string) error {
+func (db *DB) LinkOIDCIdentity(ctx context.Context, userID int64, issuer, subject, email string) error {
 	if email != "" {
-		_, err := db.Exec(db.q(`UPDATE users SET oidc_issuer = ?, oidc_subject = ?, email = ? WHERE id = ?`), issuer, subject, email, userID)
+		_, err := db.ExecContext(ctx, db.q(`UPDATE users SET oidc_issuer = ?, oidc_subject = ?, email = ? WHERE id = ?`), issuer, subject, email, userID)
 		return err
 	}
-	_, err := db.Exec(db.q(`UPDATE users SET oidc_issuer = ?, oidc_subject = ? WHERE id = ?`), issuer, subject, userID)
+	_, err := db.ExecContext(ctx, db.q(`UPDATE users SET oidc_issuer = ?, oidc_subject = ? WHERE id = ?`), issuer, subject, userID)
 	return err
 }
 
 // CreateOIDCUser provisions a new SSO-only user (empty password hash — password
 // login is impossible until one is set).
-func (db *DB) CreateOIDCUser(username, email, issuer, subject string, isAdmin bool) (User, error) {
+func (db *DB) CreateOIDCUser(ctx context.Context, username, email, issuer, subject string, isAdmin bool) (User, error) {
 	isAdminInt := 0
 	if isAdmin {
 		isAdminInt = 1
@@ -1543,7 +1544,7 @@ func (db *DB) CreateOIDCUser(username, email, issuer, subject string, isAdmin bo
 	}
 	var id int64
 	if db.driver == "postgres" {
-		err := db.QueryRow(
+		err := db.QueryRowContext(ctx,
 			db.q(`INSERT INTO users (username, password_hash, is_admin, email, oidc_issuer, oidc_subject) VALUES (?, '', ?, ?, ?, ?) RETURNING id`),
 			username, isAdminInt, emailPtr, issuer, subject,
 		).Scan(&id)
@@ -1551,7 +1552,7 @@ func (db *DB) CreateOIDCUser(username, email, issuer, subject string, isAdmin bo
 			return User{}, err
 		}
 	} else {
-		res, err := db.Exec(
+		res, err := db.ExecContext(ctx,
 			db.q(`INSERT INTO users (username, password_hash, is_admin, email, oidc_issuer, oidc_subject) VALUES (?, '', ?, ?, ?, ?)`),
 			username, isAdminInt, emailPtr, issuer, subject,
 		)
@@ -1563,25 +1564,25 @@ func (db *DB) CreateOIDCUser(username, email, issuer, subject string, isAdmin bo
 			return User{}, err
 		}
 	}
-	return db.GetUserByID(id)
+	return db.GetUserByID(ctx, id)
 }
 
 // SetUserAdmin updates a user's admin flag (used to sync from an IdP group claim).
-func (db *DB) SetUserAdmin(userID int64, isAdmin bool) error {
+func (db *DB) SetUserAdmin(ctx context.Context, userID int64, isAdmin bool) error {
 	v := 0
 	if isAdmin {
 		v = 1
 	}
-	_, err := db.Exec(db.q(`UPDATE users SET is_admin = ? WHERE id = ?`), v, userID)
+	_, err := db.ExecContext(ctx, db.q(`UPDATE users SET is_admin = ? WHERE id = ?`), v, userID)
 	return err
 }
 
 // ======== API Tokens ========
 
-func (db *DB) CreateToken(userID int64, name, tokenHash string) (APIToken, error) {
+func (db *DB) CreateToken(ctx context.Context, userID int64, name, tokenHash string) (APIToken, error) {
 	var id int64
 	if db.driver == "postgres" {
-		err := db.QueryRow(
+		err := db.QueryRowContext(ctx,
 			db.q(`INSERT INTO api_tokens (user_id, name, token_hash) VALUES (?, ?, ?) RETURNING id`),
 			userID, name, tokenHash,
 		).Scan(&id)
@@ -1589,7 +1590,7 @@ func (db *DB) CreateToken(userID int64, name, tokenHash string) (APIToken, error
 			return APIToken{}, err
 		}
 	} else {
-		res, err := db.Exec(
+		res, err := db.ExecContext(ctx,
 			db.q(`INSERT INTO api_tokens (user_id, name, token_hash) VALUES (?, ?, ?)`),
 			userID, name, tokenHash,
 		)
@@ -1601,13 +1602,13 @@ func (db *DB) CreateToken(userID int64, name, tokenHash string) (APIToken, error
 			return APIToken{}, err
 		}
 	}
-	return db.getTokenByID(id)
+	return db.getTokenByID(ctx, id)
 }
 
-func (db *DB) getTokenByID(id int64) (APIToken, error) {
+func (db *DB) getTokenByID(ctx context.Context, id int64) (APIToken, error) {
 	var t APIToken
 	var lastUsed *string
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		db.q(`SELECT id, user_id, name, created_at, last_used_at FROM api_tokens WHERE id = ?`), id,
 	).Scan(&t.ID, &t.UserID, &t.Name, &t.CreatedAt, &lastUsed)
 	if err != nil {
@@ -1619,10 +1620,10 @@ func (db *DB) getTokenByID(id int64) (APIToken, error) {
 	return t, nil
 }
 
-func (db *DB) GetTokenByHash(hash string) (APIToken, error) {
+func (db *DB) GetTokenByHash(ctx context.Context, hash string) (APIToken, error) {
 	var t APIToken
 	var lastUsed *string
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		db.q(`SELECT id, user_id, name, created_at, last_used_at FROM api_tokens WHERE token_hash = ?`), hash,
 	).Scan(&t.ID, &t.UserID, &t.Name, &t.CreatedAt, &lastUsed)
 	if err != nil {
@@ -1634,8 +1635,8 @@ func (db *DB) GetTokenByHash(hash string) (APIToken, error) {
 	return t, nil
 }
 
-func (db *DB) ListTokens(userID int64) ([]APIToken, error) {
-	rows, err := db.Query(
+func (db *DB) ListTokens(ctx context.Context, userID int64) ([]APIToken, error) {
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT id, user_id, name, created_at, last_used_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC`),
 		userID,
 	)
@@ -1658,8 +1659,8 @@ func (db *DB) ListTokens(userID int64) ([]APIToken, error) {
 	return tokens, rows.Err()
 }
 
-func (db *DB) RevokeToken(id, userID int64) error {
-	res, err := db.Exec(db.q(`DELETE FROM api_tokens WHERE id = ? AND user_id = ?`), id, userID)
+func (db *DB) RevokeToken(ctx context.Context, id, userID int64) error {
+	res, err := db.ExecContext(ctx, db.q(`DELETE FROM api_tokens WHERE id = ? AND user_id = ?`), id, userID)
 	if err != nil {
 		return err
 	}
@@ -1671,39 +1672,39 @@ func (db *DB) RevokeToken(id, userID int64) error {
 }
 
 // UpdateTokenLastUsed updates last_used_at; called asynchronously.
-func (db *DB) UpdateTokenLastUsed(id int64) {
+func (db *DB) UpdateTokenLastUsed(ctx context.Context, id int64) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := db.Exec(db.q(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`), now, id); err != nil {
+	if _, err := db.ExecContext(ctx, db.q(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`), now, id); err != nil {
 		log.Printf("UpdateTokenLastUsed(%d): %v", id, err)
 	}
 }
 
 // ======== Task Shares ========
 
-func (db *DB) AddShare(taskID, sharedWithUserID int64) error {
+func (db *DB) AddShare(ctx context.Context, taskID, sharedWithUserID int64) error {
 	var q string
 	if db.driver == "postgres" {
 		q = db.q(`INSERT INTO task_shares (task_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING`)
 	} else {
 		q = `INSERT OR IGNORE INTO task_shares (task_id, user_id) VALUES (?, ?)`
 	}
-	_, err := db.Exec(q, taskID, sharedWithUserID)
+	_, err := db.ExecContext(ctx, q, taskID, sharedWithUserID)
 	return err
 }
 
-func (db *DB) RemoveShare(taskID, sharedWithUserID int64) error {
-	_, err := db.Exec(db.q(`DELETE FROM task_shares WHERE task_id = ? AND user_id = ?`), taskID, sharedWithUserID)
+func (db *DB) RemoveShare(ctx context.Context, taskID, sharedWithUserID int64) error {
+	_, err := db.ExecContext(ctx, db.q(`DELETE FROM task_shares WHERE task_id = ? AND user_id = ?`), taskID, sharedWithUserID)
 	return err
 }
 
-func (db *DB) IsSharedWith(taskID, userID int64) (bool, error) {
+func (db *DB) IsSharedWith(ctx context.Context, taskID, userID int64) (bool, error) {
 	var n int
-	err := db.QueryRow(db.q(`SELECT COUNT(*) FROM task_shares WHERE task_id = ? AND user_id = ?`), taskID, userID).Scan(&n)
+	err := db.QueryRowContext(ctx, db.q(`SELECT COUNT(*) FROM task_shares WHERE task_id = ? AND user_id = ?`), taskID, userID).Scan(&n)
 	return n > 0, err
 }
 
-func (db *DB) GetSharesForTask(taskID int64) ([]SharedUser, error) {
-	rows, err := db.Query(
+func (db *DB) GetSharesForTask(ctx context.Context, taskID int64) ([]SharedUser, error) {
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT u.id, u.username FROM task_shares ts JOIN users u ON u.id = ts.user_id WHERE ts.task_id = ? ORDER BY u.username ASC`),
 		taskID,
 	)
@@ -1724,9 +1725,9 @@ func (db *DB) GetSharesForTask(taskID int64) ([]SharedUser, error) {
 
 // LookupUsers returns users whose username contains the search string (case-insensitive),
 // excluding the given user. Used for the share-task autocomplete.
-func (db *DB) LookupUsers(query string, excludeUserID int64) ([]SharedUser, error) {
+func (db *DB) LookupUsers(ctx context.Context, query string, excludeUserID int64) ([]SharedUser, error) {
 	pattern := "%" + strings.ToLower(query) + "%"
-	rows, err := db.Query(
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT id, username FROM users WHERE lower(username) LIKE ? AND id != ? ORDER BY username ASC LIMIT 20`),
 		pattern, excludeUserID,
 	)
@@ -1747,9 +1748,9 @@ func (db *DB) LookupUsers(query string, excludeUserID int64) ([]SharedUser, erro
 
 // ReceiptBelongsToUser checks that the given receipt file is attached to a completion
 // whose task is accessible by userID (owned or shared).
-func (db *DB) ReceiptBelongsToUser(filename string, userID int64) (bool, error) {
+func (db *DB) ReceiptBelongsToUser(ctx context.Context, filename string, userID int64) (bool, error) {
 	var n int
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		db.q(`SELECT COUNT(*) FROM completions c
 		      JOIN tasks t ON t.id = c.task_id
 		      WHERE c.receipt_file = ?
@@ -1761,10 +1762,10 @@ func (db *DB) ReceiptBelongsToUser(filename string, userID int64) (bool, error) 
 
 // ======== Webhooks ========
 
-func (db *DB) CreateWebhook(userID int64, url, events, secret string) (Webhook, error) {
+func (db *DB) CreateWebhook(ctx context.Context, userID int64, url, events, secret string) (Webhook, error) {
 	var id int64
 	if db.driver == "postgres" {
-		err := db.QueryRow(
+		err := db.QueryRowContext(ctx,
 			db.q(`INSERT INTO webhooks (user_id, url, events, secret) VALUES (?, ?, ?, ?) RETURNING id`),
 			userID, url, events, secret,
 		).Scan(&id)
@@ -1772,7 +1773,7 @@ func (db *DB) CreateWebhook(userID int64, url, events, secret string) (Webhook, 
 			return Webhook{}, err
 		}
 	} else {
-		res, err := db.Exec(
+		res, err := db.ExecContext(ctx,
 			db.q(`INSERT INTO webhooks (user_id, url, events, secret) VALUES (?, ?, ?, ?)`),
 			userID, url, events, secret,
 		)
@@ -1784,19 +1785,19 @@ func (db *DB) CreateWebhook(userID int64, url, events, secret string) (Webhook, 
 			return Webhook{}, err
 		}
 	}
-	return db.getWebhookByID(id)
+	return db.getWebhookByID(ctx, id)
 }
 
-func (db *DB) getWebhookByID(id int64) (Webhook, error) {
+func (db *DB) getWebhookByID(ctx context.Context, id int64) (Webhook, error) {
 	var wh Webhook
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		db.q(`SELECT id, user_id, url, events, secret, created_at FROM webhooks WHERE id = ?`), id,
 	).Scan(&wh.ID, &wh.UserID, &wh.URL, &wh.Events, &wh.Secret, &wh.CreatedAt)
 	return wh, err
 }
 
-func (db *DB) ListWebhooks(userID int64) ([]Webhook, error) {
-	rows, err := db.Query(
+func (db *DB) ListWebhooks(ctx context.Context, userID int64) ([]Webhook, error) {
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT id, user_id, url, events, secret, created_at FROM webhooks WHERE user_id = ? ORDER BY created_at ASC`),
 		userID,
 	)
@@ -1815,8 +1816,8 @@ func (db *DB) ListWebhooks(userID int64) ([]Webhook, error) {
 	return hooks, rows.Err()
 }
 
-func (db *DB) DeleteWebhook(id, userID int64) error {
-	res, err := db.Exec(db.q(`DELETE FROM webhooks WHERE id = ? AND user_id = ?`), id, userID)
+func (db *DB) DeleteWebhook(ctx context.Context, id, userID int64) error {
+	res, err := db.ExecContext(ctx, db.q(`DELETE FROM webhooks WHERE id = ? AND user_id = ?`), id, userID)
 	if err != nil {
 		return err
 	}
@@ -1828,15 +1829,37 @@ func (db *DB) DeleteWebhook(id, userID int64) error {
 }
 
 // GetWebhooksForUser returns all webhooks for firing — includes secret.
-func (db *DB) GetWebhooksForUser(userID int64) ([]Webhook, error) {
-	return db.ListWebhooks(userID)
+func (db *DB) GetWebhooksForUser(ctx context.Context, userID int64) ([]Webhook, error) {
+	return db.ListWebhooks(ctx, userID)
+}
+
+// GetMonthDigestWebhooks returns every webhook subscribed to "month.digest",
+// across all users, in a single query — used by FireMonthDigest to avoid
+// querying webhooks per-user for a fan-out that usually has few subscribers.
+func (db *DB) GetMonthDigestWebhooks(ctx context.Context) ([]Webhook, error) {
+	rows, err := db.QueryContext(ctx,
+		db.q(`SELECT id, user_id, url, events, secret, created_at FROM webhooks WHERE ',' || events || ',' LIKE '%,month.digest,%'`),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hooks []Webhook
+	for rows.Next() {
+		var wh Webhook
+		if err := rows.Scan(&wh.ID, &wh.UserID, &wh.URL, &wh.Events, &wh.Secret, &wh.CreatedAt); err != nil {
+			return nil, err
+		}
+		hooks = append(hooks, wh)
+	}
+	return hooks, rows.Err()
 }
 
 // ======== Audit Log ========
 
 // InsertAuditLog records an action. Intended to be called in a goroutine (best-effort).
-func (db *DB) InsertAuditLog(userID int64, action, entityType string, entityID int64, entityLabel string) {
-	_, err := db.Exec(
+func (db *DB) InsertAuditLog(ctx context.Context, userID int64, action, entityType string, entityID int64, entityLabel string) {
+	_, err := db.ExecContext(ctx,
 		db.q(`INSERT INTO audit_logs (user_id, action, entity_type, entity_id, entity_label) VALUES (?, ?, ?, ?, ?)`),
 		userID, action, entityType, entityID, entityLabel,
 	)
@@ -1846,12 +1869,12 @@ func (db *DB) InsertAuditLog(userID int64, action, entityType string, entityID i
 }
 
 // GetAuditLogs returns audit log entries, newest first.
-func (db *DB) GetAuditLogs(limit, offset int) ([]AuditLog, int, error) {
+func (db *DB) GetAuditLogs(ctx context.Context, limit, offset int) ([]AuditLog, int, error) {
 	var total int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs`).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := db.Query(
+	rows, err := db.QueryContext(ctx,
 		db.q(`SELECT al.id, al.user_id, COALESCE(u.username, 'deleted'), al.action, al.entity_type, al.entity_id, al.entity_label, al.created_at
 		 FROM audit_logs al
 		 LEFT JOIN users u ON u.id = al.user_id

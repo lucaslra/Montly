@@ -45,6 +45,10 @@ func securityHeaders(secure bool) func(http.Handler) http.Handler {
 }
 
 func main() {
+	// ── Background context (cancels goroutines on shutdown) ───────────────────
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// ── Database ──────────────────────────────────────────────────────────────
 	dbType := os.Getenv("DB_TYPE")
 	if dbType == "" {
@@ -81,7 +85,7 @@ func main() {
 	// ── First-run admin bootstrap ─────────────────────────────────────────────
 	var settingsMigrationAdminID int64
 
-	n, err := db.CountUsers()
+	n, err := db.CountUsers(ctx)
 	if err != nil {
 		log.Fatalf("count users: %v", err)
 	}
@@ -97,11 +101,11 @@ func main() {
 			if err != nil {
 				log.Fatalf("hash admin password: %v", err)
 			}
-			admin, err := db.CreateUser(adminUser, string(hash), true)
+			admin, err := db.CreateUser(ctx, adminUser, string(hash), true)
 			if err != nil {
 				log.Fatalf("create admin user: %v", err)
 			}
-			if err := db.AssignOrphanedTasks(admin.ID); err != nil {
+			if err := db.AssignOrphanedTasks(ctx, admin.ID); err != nil {
 				log.Fatalf("assign orphaned tasks: %v", err)
 			}
 			settingsMigrationAdminID = admin.ID
@@ -111,14 +115,14 @@ func main() {
 		}
 	} else {
 		// Find the first admin for the settings schema migration (one-time).
-		if fa, err := db.GetFirstAdmin(); err == nil {
+		if fa, err := db.GetFirstAdmin(ctx); err == nil {
 			settingsMigrationAdminID = fa.ID
 		}
 	}
 
 	// ── Settings schema migration (global → per-user) ─────────────────────────
 	if settingsMigrationAdminID != 0 {
-		if err := db.MigrateSettingsToUserScoped(settingsMigrationAdminID); err != nil {
+		if err := db.MigrateSettingsToUserScoped(ctx, settingsMigrationAdminID); err != nil {
 			log.Fatalf("migrate settings: %v", err)
 		}
 	}
@@ -150,10 +154,6 @@ func main() {
 	}
 	trustProxy := os.Getenv("TRUST_PROXY_HEADERS") == "true"
 
-	// ── Background context (cancels goroutines on shutdown) ───────────────────
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// ── Router ────────────────────────────────────────────────────────────────
 	digestSecret := os.Getenv("DIGEST_WEBHOOK_SECRET")
 	if digestSecret == "" {
@@ -161,21 +161,22 @@ func main() {
 	}
 
 	safeClient := safeWebhookClient()
-	h  := &Handler{db: db, receiptsDir: receiptsDir, client: safeClient}
+	auditQueue := newAuditQueue(ctx, db)
+	h := &Handler{db: db, receiptsDir: receiptsDir, client: safeClient, auditQueue: auditQueue}
 	rl := newRateLimiter(ctx)
 
 	// ── OIDC / SSO (optional; enabled when OIDC_ISSUER is set) ─────────────────
+	// Discovery (a network call to the IdP) runs lazily with background retries
+	// rather than blocking startup — a transient IdP outage must not crash-loop
+	// the app or lock out password users. Config validation (below) stays
+	// synchronous and fatal: it only checks env vars, not network reachability.
 	oidcCfg := loadOIDCConfig()
 	var oidcProvider OIDCProvider
 	if oidcCfg != nil {
 		if err := oidcCfg.Validate(); err != nil {
 			log.Fatalf("oidc config: %v", err)
 		}
-		provider, err := newRealOIDCProvider(ctx, *oidcCfg)
-		if err != nil {
-			log.Fatalf("oidc init: %v", err)
-		}
-		oidcProvider = provider
+		oidcProvider = newLazyOIDCProvider(ctx, *oidcCfg)
 		log.Printf("OIDC enabled (issuer=%s, provider=%q, signup=%v)", oidcCfg.Issuer, oidcCfg.ProviderName, oidcCfg.AllowSignup)
 	}
 	passwordDisabled := os.Getenv("DISABLE_PASSWORD_LOGIN") == "true"
@@ -184,10 +185,10 @@ func main() {
 		passwordDisabled = false
 	}
 
-	ah := &AuthHandler{db: db, secret: secret, secure: secureCookies, trustProxy: trustProxy, rl: rl, oidc: oidcProvider, oidcCfg: oidcCfg, passwordDisabled: passwordDisabled}
-	uh := &UserHandler{db: db}
-	th := &TokenHandler{db: db}
-	wh := &WebhookHandler{db: db, client: safeClient, digestSecret: digestSecret}
+	ah := &AuthHandler{db: db, secret: secret, secure: secureCookies, trustProxy: trustProxy, rl: rl, auditQueue: auditQueue, oidc: oidcProvider, oidcCfg: oidcCfg, passwordDisabled: passwordDisabled}
+	uh := &UserHandler{db: db, rl: rl, trustProxy: trustProxy, auditQueue: auditQueue}
+	th := &TokenHandler{db: db, auditQueue: auditQueue}
+	wh := &WebhookHandler{db: db, client: safeClient, digestSecret: digestSecret, auditQueue: auditQueue}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -237,7 +238,7 @@ func main() {
 		})
 	}
 
-	r.Route("/api",    func(r chi.Router) { mountRoutes(r) })
+	r.Route("/api", func(r chi.Router) { mountRoutes(r) })
 	r.Route("/api/v1", func(r chi.Router) { mountRoutes(r) })
 
 	dist, err := fs.Sub(static, "dist")
@@ -272,7 +273,7 @@ func startMonthDigestScheduler(ctx context.Context, db *DB, digestSecret string)
 			}
 			month := next.Format("2006-01")
 			log.Printf("firing month.digest for %s", month)
-			FireMonthDigest(db, month, safeWebhookClient(), digestSecret)
+			FireMonthDigest(ctx, db, month, safeWebhookClient(), digestSecret)
 		}
 	}()
 }

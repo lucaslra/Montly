@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -25,6 +26,7 @@ type Handler struct {
 	db          *DB
 	receiptsDir string
 	client      *http.Client
+	auditQueue  *AuditQueue
 }
 
 // receiptFilenameRe enforces that stored/served filenames are always UUID-based.
@@ -90,8 +92,8 @@ var allowedNumberFormats = map[string]bool{
 
 // taskOwnerCheck loads the task and returns it only if it belongs to userID.
 // Writes the appropriate error and returns false on failure.
-func (h *Handler) taskOwnerCheck(w http.ResponseWriter, taskID, userID int64) (Task, bool) {
-	task, err := h.db.GetTaskByID(taskID)
+func (h *Handler) taskOwnerCheck(ctx context.Context, w http.ResponseWriter, taskID, userID int64) (Task, bool) {
+	task, err := h.db.GetTaskByID(ctx, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "task not found", http.StatusNotFound)
 		return Task{}, false
@@ -109,8 +111,8 @@ func (h *Handler) taskOwnerCheck(w http.ResponseWriter, taskID, userID int64) (T
 }
 
 // taskAccessCheck loads the task and returns it if userID owns it or is a shared collaborator.
-func (h *Handler) taskAccessCheck(w http.ResponseWriter, taskID, userID int64) (Task, bool) {
-	task, err := h.db.GetTaskByID(taskID)
+func (h *Handler) taskAccessCheck(ctx context.Context, w http.ResponseWriter, taskID, userID int64) (Task, bool) {
+	task, err := h.db.GetTaskByID(ctx, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "task not found", http.StatusNotFound)
 		return Task{}, false
@@ -122,7 +124,7 @@ func (h *Handler) taskAccessCheck(w http.ResponseWriter, taskID, userID int64) (
 	if task.UserID == userID {
 		return task, true
 	}
-	shared, err := h.db.IsSharedWith(taskID, userID)
+	shared, err := h.db.IsSharedWith(ctx, taskID, userID)
 	if err != nil {
 		writeServerError(w, "failed to check access", err)
 		return Task{}, false
@@ -191,7 +193,7 @@ func safeRemoveReceipt(receiptsDir, filename string) {
 // --- Settings ---
 
 func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := h.db.GetSettings(currentUser(r).UserID)
+	settings, err := h.db.GetSettings(r.Context(), currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to get settings", err)
 		return
@@ -261,11 +263,11 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := currentUser(r).UserID
-	if err := h.db.SaveSettings(userID, filtered); err != nil {
+	if err := h.db.SaveSettings(r.Context(), userID, filtered); err != nil {
 		writeServerError(w, "failed to save settings", err)
 		return
 	}
-	settings, err := h.db.GetSettings(userID)
+	settings, err := h.db.GetSettings(r.Context(), userID)
 	if err != nil {
 		writeServerError(w, "failed to get settings", err)
 		return
@@ -285,7 +287,7 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	tasks, err := h.db.GetTasks(month, currentUser(r).UserID)
+	tasks, err := h.db.GetTasks(r.Context(), month, currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to list tasks", err)
 		return
@@ -299,11 +301,11 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskAccessCheck(w, id, currentUser(r).UserID)
+	task, ok := h.taskAccessCheck(r.Context(), w, id, currentUser(r).UserID)
 	if !ok {
 		return
 	}
-	shares, err := h.db.GetSharesForTask(id)
+	shares, err := h.db.GetSharesForTask(r.Context(), id)
 	if err != nil {
 		writeServerError(w, "failed to load shares", err)
 		return
@@ -408,12 +410,12 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := currentUser(r).UserID
-	task, err := h.db.CreateTask(req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Amount, req.Metadata, userID, req.Interval)
+	task, err := h.db.CreateTask(r.Context(), req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Amount, req.Metadata, userID, req.Interval)
 	if err != nil {
 		writeServerError(w, "failed to create task", err)
 		return
 	}
-	go h.db.InsertAuditLog(userID, "create", "task", task.ID, task.Title)
+	h.auditQueue.Enqueue(userID, "create", "task", task.ID, task.Title)
 	writeJSONCreated(w, task)
 }
 
@@ -423,14 +425,14 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID); !ok {
+	if _, ok := h.taskOwnerCheck(r.Context(), w, id, currentUser(r).UserID); !ok {
 		return
 	}
 	req, ok := parseTaskBody(w, r)
 	if !ok {
 		return
 	}
-	task, err := h.db.UpdateTaskWithAmountBackfill(id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Amount, req.Metadata, req.Interval)
+	task, err := h.db.UpdateTaskWithAmountBackfill(r.Context(), id, req.Title, req.Description, req.Type, req.StartDate, req.EndDate, req.Amount, req.Metadata, req.Interval)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, "task not found", http.StatusNotFound)
 		return
@@ -439,7 +441,7 @@ func (h *Handler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "failed to update task", err)
 		return
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "update", "task", task.ID, task.Title)
+	h.auditQueue.Enqueue(currentUser(r).UserID, "update", "task", task.ID, task.Title)
 	writeJSON(w, task)
 }
 
@@ -449,23 +451,23 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID); !ok {
+	if _, ok := h.taskOwnerCheck(r.Context(), w, id, currentUser(r).UserID); !ok {
 		return
 	}
 	// Collect receipt filenames before deletion (cascade will remove DB rows).
-	receipts, err := h.db.GetReceiptsForTask(id)
+	receipts, err := h.db.GetReceiptsForTask(r.Context(), id)
 	if err != nil {
 		log.Printf("GetReceiptsForTask(%d): %v", id, err)
 	}
 	// Delete DB record first; only remove files after the DB confirms success.
-	if err = h.db.DeleteTask(id); err != nil {
+	if err = h.db.DeleteTask(r.Context(), id); err != nil {
 		writeServerError(w, "failed to delete task", err)
 		return
 	}
 	for _, f := range receipts {
 		safeRemoveReceipt(h.receiptsDir, f)
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "delete", "task", id, "")
+	h.auditQueue.Enqueue(currentUser(r).UserID, "delete", "task", id, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -475,15 +477,15 @@ func (h *Handler) ArchiveTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID)
+	task, ok := h.taskOwnerCheck(r.Context(), w, id, currentUser(r).UserID)
 	if !ok {
 		return
 	}
-	if err := h.db.ArchiveTask(id); err != nil {
+	if err := h.db.ArchiveTask(r.Context(), id); err != nil {
 		writeServerError(w, "failed to archive task", err)
 		return
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "archive", "task", id, task.Title)
+	h.auditQueue.Enqueue(currentUser(r).UserID, "archive", "task", id, task.Title)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -493,20 +495,20 @@ func (h *Handler) UnarchiveTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskOwnerCheck(w, id, currentUser(r).UserID)
+	task, ok := h.taskOwnerCheck(r.Context(), w, id, currentUser(r).UserID)
 	if !ok {
 		return
 	}
-	if err := h.db.UnarchiveTask(id); err != nil {
+	if err := h.db.UnarchiveTask(r.Context(), id); err != nil {
 		writeServerError(w, "failed to unarchive task", err)
 		return
 	}
-	go h.db.InsertAuditLog(currentUser(r).UserID, "unarchive", "task", id, task.Title)
+	h.auditQueue.Enqueue(currentUser(r).UserID, "unarchive", "task", id, task.Title)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) ListArchivedTasks(w http.ResponseWriter, r *http.Request) {
-	tasks, err := h.db.GetArchivedTasks(currentUser(r).UserID)
+	tasks, err := h.db.GetArchivedTasks(r.Context(), currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to list archived tasks", err)
 		return
@@ -526,7 +528,7 @@ func (h *Handler) ListCompletions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	completions, err := h.db.GetCompletions(month, currentUser(r).UserID)
+	completions, err := h.db.GetCompletions(r.Context(), month, currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to list completions", err)
 		return
@@ -551,7 +553,7 @@ func (h *Handler) GetReport(w http.ResponseWriter, r *http.Request) {
 	for i := range forecastMonths {
 		forecastMonths[i] = addReportMonth(anchor, i+1)
 	}
-	data, err := h.db.GetReportData(currentUser(r).UserID, historyMonths, forecastMonths)
+	data, err := h.db.GetReportData(r.Context(), currentUser(r).UserID, historyMonths, forecastMonths)
 	if err != nil {
 		writeServerError(w, "failed to load report data", err)
 		return
@@ -576,12 +578,12 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskAccessCheck(w, req.TaskID, currentUser(r).UserID)
+	task, ok := h.taskAccessCheck(r.Context(), w, req.TaskID, currentUser(r).UserID)
 	if !ok {
 		return
 	}
 
-	existing, found, err := h.db.GetCompletion(req.TaskID, req.Month)
+	existing, found, err := h.db.GetCompletion(r.Context(), req.TaskID, req.Month)
 	if err != nil {
 		writeServerError(w, "failed to check completion", err)
 		return
@@ -592,32 +594,32 @@ func (h *Handler) ToggleCompletion(w http.ResponseWriter, r *http.Request) {
 	if found && !existing.Skipped {
 		// Was completed → uncomplete.
 		receiptFile := existing.ReceiptFile
-		if err := h.db.RemoveCompletion(req.TaskID, req.Month); err != nil {
+		if err := h.db.RemoveCompletion(r.Context(), req.TaskID, req.Month); err != nil {
 			writeServerError(w, "failed to remove completion", err)
 			return
 		}
 		safeRemoveReceipt(h.receiptsDir, receiptFile)
 		writeJSON(w, map[string]bool{"completed": false})
-		go FireWebhooks(h.db, task.UserID, "task.uncompleted", task.ID, task.Title, req.Month, h.client)
-		go h.db.InsertAuditLog(actorID, "uncomplete", "completion", task.ID, task.Title)
+		go FireWebhooks(context.WithoutCancel(r.Context()), h.db, task.UserID, "task.uncompleted", task.ID, task.Title, req.Month, h.client)
+		h.auditQueue.Enqueue(actorID, "uncomplete", "completion", task.ID, task.Title)
 	} else if found && existing.Skipped {
 		// Was skipped → mark as completed.
-		if _, err := h.db.CompleteSkipped(req.TaskID, req.Month); err != nil {
+		if _, err := h.db.CompleteSkipped(r.Context(), req.TaskID, req.Month); err != nil {
 			writeServerError(w, "failed to complete task", err)
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
-		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month, h.client)
-		go h.db.InsertAuditLog(actorID, "complete", "completion", task.ID, task.Title)
+		go FireWebhooks(context.WithoutCancel(r.Context()), h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month, h.client)
+		h.auditQueue.Enqueue(actorID, "complete", "completion", task.ID, task.Title)
 	} else {
 		// Pending → complete.
-		if _, err := h.db.AddCompletion(req.TaskID, req.Month); err != nil {
+		if _, err := h.db.AddCompletion(r.Context(), req.TaskID, req.Month); err != nil {
 			writeServerError(w, "failed to add completion", err)
 			return
 		}
 		writeJSON(w, map[string]bool{"completed": true})
-		go FireWebhooks(h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month, h.client)
-		go h.db.InsertAuditLog(actorID, "complete", "completion", task.ID, task.Title)
+		go FireWebhooks(context.WithoutCancel(r.Context()), h.db, task.UserID, "task.completed", task.ID, task.Title, req.Month, h.client)
+		h.auditQueue.Enqueue(actorID, "complete", "completion", task.ID, task.Title)
 	}
 }
 
@@ -632,7 +634,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskAccessCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskAccessCheck(r.Context(), w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
 
@@ -649,7 +651,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, found, err := h.db.GetCompletion(taskID, month)
+	existing, found, err := h.db.GetCompletion(r.Context(), taskID, month)
 	if err != nil {
 		writeServerError(w, "failed to get completion", err)
 		return
@@ -671,7 +673,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		completion, err = h.db.SetCompletionAmount(taskID, month, *req.Amount)
+		completion, err = h.db.SetCompletionAmount(r.Context(), taskID, month, *req.Amount)
 		if err != nil {
 			writeServerError(w, "failed to update completion amount", err)
 			return
@@ -683,7 +685,7 @@ func (h *Handler) PatchCompletion(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "note must be 1000 characters or fewer", http.StatusBadRequest)
 			return
 		}
-		completion, err = h.db.SetCompletionNote(taskID, month, *req.Note)
+		completion, err = h.db.SetCompletionNote(r.Context(), taskID, month, *req.Note)
 		if err != nil {
 			writeServerError(w, "failed to update completion note", err)
 			return
@@ -704,11 +706,11 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskAccessCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskAccessCheck(r.Context(), w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
 
-	existing, found, err := h.db.GetCompletion(taskID, month)
+	existing, found, err := h.db.GetCompletion(r.Context(), taskID, month)
 	if err != nil {
 		writeServerError(w, "failed to check completion", err)
 		return
@@ -776,7 +778,7 @@ func (h *Handler) UploadCompletionReceipt(w http.ResponseWriter, r *http.Request
 
 	// Update DB first; only remove old file after the DB confirms success.
 	oldReceipt := existing.ReceiptFile
-	completion, err := h.db.SetCompletionReceipt(taskID, month, filename)
+	completion, err := h.db.SetCompletionReceipt(r.Context(), taskID, month, filename)
 	if err != nil {
 		os.Remove(filepath.Join(h.receiptsDir, filename))
 		writeServerError(w, "failed to update completion", err)
@@ -797,11 +799,11 @@ func (h *Handler) DeleteCompletionReceipt(w http.ResponseWriter, r *http.Request
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskAccessCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskAccessCheck(r.Context(), w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
 
-	existing, found, err := h.db.GetCompletion(taskID, month)
+	existing, found, err := h.db.GetCompletion(r.Context(), taskID, month)
 	if err != nil {
 		writeServerError(w, "failed to check completion", err)
 		return
@@ -817,7 +819,7 @@ func (h *Handler) DeleteCompletionReceipt(w http.ResponseWriter, r *http.Request
 
 	// Clear DB record first; only remove file after the DB confirms success.
 	receiptFile := existing.ReceiptFile
-	completion, err := h.db.ClearCompletionReceipt(taskID, month)
+	completion, err := h.db.ClearCompletionReceipt(r.Context(), taskID, month)
 	if err != nil {
 		writeServerError(w, "failed to update completion", err)
 		return
@@ -843,13 +845,13 @@ func (h *Handler) SkipCompletion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "month must be YYYY-MM format", http.StatusBadRequest)
 		return
 	}
-	task, ok := h.taskAccessCheck(w, req.TaskID, currentUser(r).UserID)
+	task, ok := h.taskAccessCheck(r.Context(), w, req.TaskID, currentUser(r).UserID)
 	if !ok {
 		return
 	}
 
 	actorID := currentUser(r).UserID
-	completion, nowSkipped, err := h.db.SkipCompletion(req.TaskID, req.Month)
+	completion, nowSkipped, err := h.db.SkipCompletion(r.Context(), req.TaskID, req.Month)
 	if err != nil {
 		if errors.Is(err, ErrAlreadyCompleted) {
 			writeError(w, "task is already completed, unmark it first", http.StatusBadRequest)
@@ -860,11 +862,11 @@ func (h *Handler) SkipCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 	if nowSkipped {
 		writeJSON(w, map[string]any{"skipped": true, "completion": completion})
-		go FireWebhooks(h.db, task.UserID, "task.skipped", task.ID, task.Title, req.Month, h.client)
-		go h.db.InsertAuditLog(actorID, "skip", "completion", task.ID, task.Title)
+		go FireWebhooks(context.WithoutCancel(r.Context()), h.db, task.UserID, "task.skipped", task.ID, task.Title, req.Month, h.client)
+		h.auditQueue.Enqueue(actorID, "skip", "completion", task.ID, task.Title)
 	} else {
 		writeJSON(w, map[string]any{"skipped": false})
-		go h.db.InsertAuditLog(actorID, "unskip", "completion", task.ID, task.Title)
+		h.auditQueue.Enqueue(actorID, "unskip", "completion", task.ID, task.Title)
 	}
 }
 
@@ -880,7 +882,7 @@ func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 			offset = n
 		}
 	}
-	logs, total, err := h.db.GetAuditLogs(limit, offset)
+	logs, total, err := h.db.GetAuditLogs(r.Context(), limit, offset)
 	if err != nil {
 		writeServerError(w, "failed to list audit logs", err)
 		return
@@ -895,7 +897,7 @@ func (h *Handler) ServeReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Verify the receipt belongs to a completion owned by the requesting user.
-	ok, err := h.db.ReceiptBelongsToUser(filename, currentUser(r).UserID)
+	ok, err := h.db.ReceiptBelongsToUser(r.Context(), filename, currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to verify access", err)
 		return
@@ -941,7 +943,7 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.db.GetCompletionsForExport(currentUser(r).UserID, from, to)
+	rows, err := h.db.GetCompletionsForExport(r.Context(), currentUser(r).UserID, from, to)
 	if err != nil {
 		writeServerError(w, "failed to export", err)
 		return
@@ -1058,7 +1060,7 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.db.ImportCompletionsCSV(currentUser(r).UserID, rows)
+	result, err := h.db.ImportCompletionsCSV(r.Context(), currentUser(r).UserID, rows)
 	if err != nil {
 		writeServerError(w, "import failed", err)
 		return
@@ -1074,10 +1076,10 @@ func (h *Handler) GetTaskShares(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskOwnerCheck(r.Context(), w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
-	shares, err := h.db.GetSharesForTask(taskID)
+	shares, err := h.db.GetSharesForTask(r.Context(), taskID)
 	if err != nil {
 		writeServerError(w, "failed to load shares", err)
 		return
@@ -1094,7 +1096,7 @@ func (h *Handler) AddTaskShare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskOwnerCheck(r.Context(), w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
 	var req struct {
@@ -1112,11 +1114,11 @@ func (h *Handler) AddTaskShare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "cannot share task with yourself", http.StatusBadRequest)
 		return
 	}
-	if err := h.db.AddShare(taskID, req.UserID); err != nil {
+	if err := h.db.AddShare(r.Context(), taskID, req.UserID); err != nil {
 		writeServerError(w, "failed to add share", err)
 		return
 	}
-	shares, err := h.db.GetSharesForTask(taskID)
+	shares, err := h.db.GetSharesForTask(r.Context(), taskID)
 	if err != nil {
 		writeServerError(w, "failed to load shares", err)
 		return
@@ -1138,10 +1140,10 @@ func (h *Handler) RemoveTaskShare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid user_id", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.taskOwnerCheck(w, taskID, currentUser(r).UserID); !ok {
+	if _, ok := h.taskOwnerCheck(r.Context(), w, taskID, currentUser(r).UserID); !ok {
 		return
 	}
-	if err := h.db.RemoveShare(taskID, sharedUserID); err != nil {
+	if err := h.db.RemoveShare(r.Context(), taskID, sharedUserID); err != nil {
 		writeServerError(w, "failed to remove share", err)
 		return
 	}
@@ -1154,7 +1156,7 @@ func (h *Handler) LookupUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []SharedUser{})
 		return
 	}
-	users, err := h.db.LookupUsers(q, currentUser(r).UserID)
+	users, err := h.db.LookupUsers(r.Context(), q, currentUser(r).UserID)
 	if err != nil {
 		writeServerError(w, "failed to search users", err)
 		return
