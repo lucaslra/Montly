@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.25.0] — 2026-08-23
+
+### Fixed
+- **OIDC startup resilience** — discovery no longer blocks or crashes startup; a `lazyOIDCProvider` retries with exponential backoff in the background, so a transient IdP outage doesn't crash-loop the app or lock out password users. The SSO login button now returns a friendly 503 instead of a broken redirect while discovery is still pending.
+- **Webhook delivery retries** — `FireWebhooks` and `FireMonthDigest` now retry up to 3 attempts with exponential backoff + jitter on network errors and 5xx responses (4xx is not retried), instead of silently dropping a failed delivery.
+- **Audit log goroutine leak** — replaced one goroutine per audit write with a bounded background queue (capacity 256, single worker); a full queue drops and logs an entry instead of accumulating unbounded goroutines under DB contention.
+- **N+1 query in month-digest firing** — `FireMonthDigest` now fetches all `month.digest`-subscribed webhooks in a single query instead of one query per user.
+- **Rate limiting gaps** — admin `POST /api/users` and the OIDC login/callback endpoints are now rate-limited; only failed OIDC attempts count against the limit, so repeat legitimate SSO logins are never throttled.
+
+### Changed
+- **Context propagation** — every database-touching method now takes `context.Context` and uses the `*Context` query variants, threaded from the incoming request through the full call chain (including OIDC user resolution); detached background work (audit queue, webhook firing, token last-used updates) uses `context.WithoutCancel` so it isn't cancelled when the request returns.
+- **Dependencies** — updated Go modules (`chi`, `pgx`, `x/crypto`, `x/text`, `modernc.org/sqlite` in the backend; `go-sdk`, `x/oauth2`, `x/sys` in the MCP server) and npm packages (`vite`, `react`, `vitest`, testing-library, `jsdom` in the frontend; `@playwright/test` in e2e), plus `alpine` 3.21 → 3.24 in both Dockerfiles. Fixes CVEs in `x/text` (GO-2026-5970), `vite` (GHSA-fx2h-pf6j-xcff), and the Playwright browser downloader (GHSA-7mvr-c777-76hp).
+
+### Tests
+- **Retry/resilience coverage** — 8 new backend tests for webhook retry behavior, lazy OIDC discovery, and the audit queue's drain/drop behavior.
+- **E2E fix** — resolved a Chromium/`.app`-gTLD hostname collision surfaced by the Playwright bump (the `app` service name matched Chromium's hardcoded HSTS entry for the real `.app` gTLD, forcing HTTPS on plain-HTTP test traffic); the full 91-test suite is green.
+
 ## [0.24.1] — 2026-08-05
 
 ### Fixed
