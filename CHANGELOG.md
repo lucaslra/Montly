@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.26.0] — 2026-09-13
+
+### Fixed
+- **Dead nil-check removed** — `ListWebhooks` no longer checks a slice built with `make()` for `nil` (it can never be, since `make` always returns a non-nil slice); caught by `staticcheck` (SA4031).
+
+### Changed
+- **Dependencies** — updated Go modules (`go-oidc`, `pgx`, `go-jose`, `modernc.org/sqlite`, `modernc.org/libc`, `modernc.org/memory` in the backend; `segmentio/asm` in the MCP server) and npm packages (`react`/`react-dom`, testing-library, `vite`, `@vitejs/plugin-react` in the frontend; `@playwright/test` in e2e), staying on the pinned Go 1.25 toolchain. Verified with `govulncheck` against the go1.25.14 toolchain the Docker image actually ships — no reachable vulnerabilities in either Go module.
+
+### Added
+- **Dependabot coverage** — added `gomod` tracking for `mcp-server` and `npm` tracking for `e2e`; both were previously untracked despite being separate dependency-managed projects.
+- **GitHub code scanning** — enabled CodeQL default setup (Go, JavaScript/TypeScript, GitHub Actions) on the GitHub mirror.
+
 ## [0.25.0] — 2026-08-23
 
 ### Fixed
