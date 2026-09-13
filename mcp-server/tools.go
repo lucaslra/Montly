@@ -36,11 +36,11 @@ type listTasksSummary struct {
 }
 
 type reportMonth struct {
-	Month      string `json:"month"`
-	IsForecast bool   `json:"is_forecast"`
-	TaskCount  int    `json:"task_count"`
-	Completed  int    `json:"completed"`
-	Skipped    int    `json:"skipped"`
+	Month      string  `json:"month"`
+	IsForecast bool    `json:"is_forecast"`
+	TaskCount  int     `json:"task_count"`
+	Completed  int     `json:"completed"`
+	Skipped    int     `json:"skipped"`
 	TotalDue   float64 `json:"total_due"`
 	TotalPaid  float64 `json:"total_paid"`
 }
@@ -218,8 +218,8 @@ func getReportHandler(client *montlyClient) func(context.Context, *mcp.CallToolR
 
 		var raw struct {
 			Months []struct {
-				Month       string `json:"month"`
-				IsForecast  bool   `json:"is_forecast"`
+				Month       string       `json:"month"`
+				IsForecast  bool         `json:"is_forecast"`
 				Tasks       []task       `json:"tasks"`
 				Completions []completion `json:"completions"`
 			} `json:"months"`

@@ -146,9 +146,6 @@ func (h *WebhookHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	for i, wh := range hooks {
 		resp[i] = toWebhookResponse(wh)
 	}
-	if resp == nil {
-		resp = []webhookResponse{}
-	}
 	writeJSON(w, resp)
 }
 
