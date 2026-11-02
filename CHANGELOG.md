@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.27.0] — 2026-11-02
+
+### Added
+- **MCP task management** — `get_task`, `update_task` (partial edit; only the fields given change), `archive_task`, `list_archived_tasks`, and `delete_task` (annotated destructive). Edit, archive and delete check ownership first, so a task shared with you gets a clear refusal instead of a bare "not found".
+- **MCP export** — `export_completions` returns completion history over a month range as JSON, capped at 500 rows keeping the most recent whole months.
+- **MCP settings** — `get_settings` and `update_settings` (only the given settings change).
+- **MCP `complete_task` / `uncomplete_task`** — check the month's state first, so repeating "mark it paid" never undoes it; only `uncomplete_task` is annotated destructive, and it reports the amount, note and receipt it discarded.
+
+### Changed
+- **MCP tool annotations** — every tool is now marked read-only or explicitly destructive/non-destructive, so clients that confirm destructive actions only prompt where data can be lost.
+
+### Removed
+- **MCP `toggle_task`** — replaced by `complete_task` and `uncomplete_task`; saved prompts that name `toggle_task` need updating.
+
 ## [0.26.0] — 2026-09-13
 
 ### Fixed
