@@ -149,6 +149,45 @@ func TestClientPatch_SendsJSONBody(t *testing.T) {
 	}
 }
 
+func TestClientPut_SendsJSONBody(t *testing.T) {
+	var gotMethod string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &gotBody)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := &montlyClient{baseURL: srv.URL, token: "mt_x", http: srv.Client()}
+	c.put("/tasks/1", map[string]any{"title": "Rent"})
+
+	if gotMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", gotMethod)
+	}
+	if gotBody["title"] != "Rent" {
+		t.Errorf("body.title = %v", gotBody["title"])
+	}
+}
+
+func TestClientDelete_HandlesNoContent(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := &montlyClient{baseURL: srv.URL, token: "mt_x", http: srv.Client()}
+	if _, err := c.delete("/tasks/1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if gotMethod != "DELETE" {
+		t.Errorf("method = %q, want DELETE", gotMethod)
+	}
+}
+
 func TestMonthQuery_Escapes(t *testing.T) {
 	got := monthQuery("2026-05")
 	if got != "?month=2026-05" {
