@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,9 @@ type montlyClient struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	meMu sync.Mutex
+	meID int64 // cached ID of the token's user; 0 until first lookup
 }
 
 func newMontlyClient() *montlyClient {
@@ -89,6 +93,39 @@ func (c *montlyClient) patch(path string, body any) ([]byte, error) {
 	return c.do(http.MethodPatch, path, body)
 }
 
+func (c *montlyClient) put(path string, body any) ([]byte, error) {
+	return c.do(http.MethodPut, path, body)
+}
+
+func (c *montlyClient) delete(path string) ([]byte, error) {
+	return c.do(http.MethodDelete, path, nil)
+}
+
+// currentUserID returns the ID of the user the token belongs to, looked up
+// once via GET /api/auth/me and cached for the life of the client.
+func (c *montlyClient) currentUserID() (int64, error) {
+	c.meMu.Lock()
+	defer c.meMu.Unlock()
+	if c.meID != 0 {
+		return c.meID, nil
+	}
+	body, err := c.get("/auth/me")
+	if err != nil {
+		return 0, fmt.Errorf("fetching current user: %w", err)
+	}
+	var me struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(body, &me); err != nil {
+		return 0, fmt.Errorf("decoding current user: %w", err)
+	}
+	if me.ID == 0 {
+		return 0, fmt.Errorf("decoding current user: response has no user id")
+	}
+	c.meID = me.ID
+	return c.meID, nil
+}
+
 func monthQuery(month string) string {
 	return "?month=" + url.QueryEscape(month)
 }
@@ -103,6 +140,28 @@ type task struct {
 	IsShared    bool            `json:"is_shared,omitempty"`
 	OwnerName   string          `json:"owner_name,omitempty"`
 	Metadata    json.RawMessage `json:"metadata"`
+}
+
+// taskDetail mirrors the full task returned by GET /api/tasks/:id and
+// /api/tasks/archived. Its writable fields match the PUT /api/tasks/:id body,
+// which replaces every column, so update_task round-trips through this type.
+type taskDetail struct {
+	ID          int64        `json:"id"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Type        string       `json:"type"`
+	Amount      string       `json:"amount"`
+	StartDate   string       `json:"start_date"`
+	EndDate     string       `json:"end_date"`
+	Interval    int          `json:"interval"`
+	UserID      int64        `json:"user_id"`
+	ArchivedAt  *string      `json:"archived_at,omitempty"`
+	SharedWith  []sharedUser `json:"shared_with,omitempty"`
+}
+
+type sharedUser struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
 }
 
 type completion struct {
